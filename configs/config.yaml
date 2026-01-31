@@ -29,12 +29,12 @@ ood:
   
 # Paths
 paths:
-  checkpoints: 'checkpoints'
-  results: 'results'
-  figures: 'results/figures'
-  gifs: 'results/figures/gifs'
-  tables: 'results/tables'
-  metrics: 'results/metrics'
+  checkpoints: '/content/drive/MyDrive/Colab Notebooks/OOD/Checkpoints'
+  results: '/content/drive/MyDrive/Colab Notebooks/OOD/Results'
+  figures: '/content/drive/MyDrive/Colab Notebooks/OOD/Results/figures'
+  gifs: '/content/drive/MyDrive/Colab Notebooks/OOD/Results/figures/gifs'
+  tables: '/content/drive/MyDrive/Colab Notebooks/OOD/Results/tables'
+  metrics: '/content/drive/MyDrive/Colab Notebooks/OOD/Results/metrics'
 
 # Device
 device: 'cuda'  
