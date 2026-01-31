@@ -1,0 +1,40 @@
+# Configuration for OOD Detection and Neural Collapse Analysis
+
+# Training
+training:
+  epochs: 200
+  batch_size: 128
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 0.0005
+  val_split: 0.1
+  early_stopping_patience: 20
+  
+# Data
+data:
+  data_dir: './data'
+  num_workers: 2
+  augment: true
+  
+# Model
+model:
+  num_classes: 100
+  
+# OOD Datasets
+ood:
+  datasets:
+    - SVHN
+    #- CIFAR10
+    # - Textures  # 
+  
+# Paths
+paths:
+  checkpoints: 'checkpoints'
+  results: 'results'
+  figures: 'results/figures'
+  gifs: 'results/figures/gifs'
+  tables: 'results/tables'
+  metrics: 'results/metrics'
+
+# Device
+device: 'cuda'  
