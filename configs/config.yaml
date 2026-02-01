@@ -8,7 +8,7 @@ training:
   momentum: 0.9
   weight_decay: 0.0005
   val_split: 0.1
-  early_stopping_patience: 20
+  early_stopping_patience: 50 #needed to get to TPT
   
 # Data
 data:

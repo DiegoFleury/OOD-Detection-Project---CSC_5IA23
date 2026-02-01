@@ -216,8 +216,8 @@ class Trainer:
             else:
                 patience_counter += 1
             
-            # Save checkpoint every 50 epochs
-            if (epoch + 1) % 50 == 0:
+            # Save checkpoint every 25 epochs
+            if (epoch + 1) % 25 == 0:
                 self.save_checkpoint(
                     os.path.join(save_dir, f'resnet18_cifar100_epoch{epoch+1}.pth')
                 )

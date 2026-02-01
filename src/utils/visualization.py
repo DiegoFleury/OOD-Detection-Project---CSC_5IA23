@@ -96,7 +96,7 @@ def create_training_gif(history, save_path='results/figures/gifs/training_curves
         axes[0].plot(epochs, history['val_loss'][:epoch_end], 'r-', label='Val', linewidth=2)
         axes[0].set_xlabel('Epoch', fontsize=14)
         axes[0].set_ylabel('Loss', fontsize=14)
-        axes[0].set_title(f'Loss (Epoch {epoch_end}/{num_epochs})', fontsize=16)
+        axes[0].set_title(f'Loss (Epoch {epoch_end}/{num_epochs})', fontsize=16, fontweight='bold')
         axes[0].legend(fontsize=12)
         axes[0].grid(True, alpha=0.3)
         axes[0].set_xlim(1, num_epochs)
@@ -107,7 +107,7 @@ def create_training_gif(history, save_path='results/figures/gifs/training_curves
         axes[1].plot(epochs, history['val_acc'][:epoch_end], 'r-', label='Val', linewidth=2)
         axes[1].set_xlabel('Epoch', fontsize=14)
         axes[1].set_ylabel('Accuracy (%)', fontsize=14)
-        axes[1].set_title(f'Accuracy (Epoch {epoch_end}/{num_epochs})', fontsize=16)
+        axes[1].set_title(f'Accuracy (Epoch {epoch_end}/{num_epochs})', fontsize=16, fontweight='bold')
         axes[1].legend(fontsize=12)
         axes[1].grid(True, alpha=0.3)
         axes[1].set_xlim(1, num_epochs)
@@ -115,11 +115,12 @@ def create_training_gif(history, save_path='results/figures/gifs/training_curves
         
         plt.tight_layout()
         
-        # Save frame to buffer
+        # Save frame to buffer (CORRIGIDO)
         fig.canvas.draw()
-        image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
-        image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-        frames.append(image)
+        buf = fig.canvas.buffer_rgba()
+        image = np.asarray(buf)
+        image_rgb = image[:, :, :3]  # Converter RGBA para RGB
+        frames.append(image_rgb)
         
         plt.close(fig)
     
