@@ -2,13 +2,14 @@
 
 # Training
 training:
-  epochs: 200
+  epochs: 300
   batch_size: 128
   lr: 0.1
   momentum: 0.9
   weight_decay: 0.0005
   val_split: 0.1
-  early_stopping_patience: 50 #needed to get to TPT
+  early_stopping_patience: 999 #needed to get to TPT
+  checkpoint_frequency: 25
   
 # Data
 data:

@@ -51,7 +51,7 @@ class Trainer:
         self.device = device
         
         # Loss and optimizer
-        self.criterion = nn.CrossEntropyLoss() # Implicitly does softmax, that's why we return the logits with the neural net
+        self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.SGD(
             model.parameters(),
             lr=lr,
@@ -59,10 +59,8 @@ class Trainer:
             weight_decay=weight_decay
         )
         
-        # Learning rate scheduler (cosine annealing)
-        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=200
-        )
+        # Scheduler will be created in train() with correct T_max
+        self.scheduler = None
         
         # Training history
         self.history = {
@@ -153,7 +151,7 @@ class Trainer:
         
         return epoch_loss, epoch_acc
     
-    def train(self, epochs=200, save_dir='checkpoints', early_stopping_patience=20):
+    def train(self, epochs=200, save_dir='checkpoints', early_stopping_patience=20, checkpoint_frequency=25):
         """
         Full training loop
         
@@ -161,11 +159,17 @@ class Trainer:
             epochs: number of epochs
             save_dir: where to save checkpoints
             early_stopping_patience: epochs to wait before early stopping
+            checkpoint_frequency: save checkpoint every N epochs
         
         Returns:
             history dict
         """
         os.makedirs(save_dir, exist_ok=True)
+        
+        # Set scheduler T_max based on total epochs
+        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer, T_max=epochs
+        )
         
         patience_counter = 0
         
@@ -216,14 +220,14 @@ class Trainer:
             else:
                 patience_counter += 1
             
-            # Save checkpoint every 25 epochs
-            if (epoch + 1) % 25 == 0:
+            # Save checkpoint at specified frequency
+            if (epoch + 1) % checkpoint_frequency == 0:
                 self.save_checkpoint(
                     os.path.join(save_dir, f'resnet18_cifar100_epoch{epoch+1}.pth')
                 )
             
             # Early stopping
-            if patience_counter >= early_stopping_patience:
+            if early_stopping_patience is not None and patience_counter >= early_stopping_patience:
                 print(f"\nEarly stopping triggered after {epoch+1} epochs")
                 print(f"Best validation accuracy: {self.best_val_acc:.2f}% at epoch {self.best_epoch+1}")
                 break
@@ -237,14 +241,19 @@ class Trainer:
     
     def save_checkpoint(self, path):
         """Save model checkpoint"""
-        torch.save({
+        checkpoint = {
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
             'history': self.history,
             'best_val_acc': self.best_val_acc,
             'best_epoch': self.best_epoch,
-        }, path)
+        }
+        
+        # Only save scheduler if it exists
+        if self.scheduler is not None:
+            checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
+        
+        torch.save(checkpoint, path)
         print(f"Checkpoint saved: {path}")
     
     def load_checkpoint(self, path):
@@ -252,7 +261,11 @@ class Trainer:
         checkpoint = torch.load(path, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
+        # Load scheduler only if it was saved
+        if 'scheduler_state_dict' in checkpoint and self.scheduler is not None:
+            self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
         self.history = checkpoint['history']
         self.best_val_acc = checkpoint['best_val_acc']
         self.best_epoch = checkpoint['best_epoch']
@@ -272,7 +285,7 @@ def load_model(checkpoint_path, num_classes=100, device='cuda'):
     Returns:
         model, history
     """
-    from src.models.resnet import ResNet18
+    from src.models import ResNet18
     
     model = ResNet18(num_classes=num_classes).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
