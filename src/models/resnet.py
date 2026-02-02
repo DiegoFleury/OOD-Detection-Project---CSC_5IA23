@@ -10,7 +10,6 @@ import torch.nn.functional as F
 
 class BasicBlock(nn.Module):
     """Basic residual block for ResNet-18/34"""
-    expansion = 1
 
     def __init__(self, in_channels, out_channels, stride=1):
         super(BasicBlock, self).__init__()
@@ -83,6 +82,22 @@ class ResNet18(nn.Module):
         
         # Initialize weights
         self._initialize_weights()
+
+        # Layer inspector: hooks to capture block features for OOD/NC analysis
+        self._features = {}
+        self._register_hooks()
+    
+    def _register_hooks(self):
+        """Register forward hooks to capture block outputs"""
+        def get_hook(name):
+            def hook(module, input, output):
+                self._features[name] = output.detach()
+            return hook
+        
+        self.layer1.register_forward_hook(get_hook('layer1'))
+        self.layer2.register_forward_hook(get_hook('layer2'))
+        self.layer3.register_forward_hook(get_hook('layer3'))
+        self.layer4.register_forward_hook(get_hook('layer4'))
     
     def _make_layer(self, out_channels, num_blocks, stride):
         """Create a layer group with multiple blocks"""
@@ -143,12 +158,56 @@ class ResNet18(nn.Module):
     
     def get_features(self, x):
         """Extract penultimate layer features (before classifier)"""
-        _, features = self.forward(x, return_features=True)
+        with torch.no_grad():
+            _, features = self.forward(x, return_features=True)
         return features
     
     def get_classifier_weights(self):
         """Get classifier weight matrix [num_classes, 512]"""
         return self.fc.weight.data
+    
+    def get_block_features(self, x, block_name='layer4'):
+        """
+        Extract features from a specific block
+        
+        Args:
+            x: input images [B, 3, H, W]
+            block_name: 'layer1', 'layer2', 'layer3', or 'layer4'
+        
+        Returns:
+            features from specified block [B, C, H, W]
+        """
+        with torch.no_grad():
+            _ = self.forward(x)
+        return self._features.get(block_name)
+
+    def get_all_features(self, x):
+        """
+        Get features from all layers in a single forward pass
+
+        Args:
+            x: input images [B, 3, H, W]
+
+        Returns:
+            dict with:
+                'layer1': [B, 64, 32, 32]
+                'layer2': [B, 128, 16, 16]
+                'layer3': [B, 256, 8, 8]
+                'layer4': [B, 512, 4, 4]
+                'penultimate': [B, 512] (after avgpool)
+                'logits': [B, 100]
+        """
+        with torch.no_grad():
+            logits, penultimate = self.forward(x, return_features=True)
+
+        return {
+            'layer1': self._features['layer1'],
+            'layer2': self._features['layer2'],
+            'layer3': self._features['layer3'],
+            'layer4': self._features['layer4'],
+            'penultimate': penultimate,
+            'logits': logits
+        }
 
 
 def test_resnet18():
@@ -168,7 +227,22 @@ def test_resnet18():
     weights = model.get_classifier_weights()
     assert weights.shape == (100, 512), f"Expected (100, 512), got {weights.shape}"
     
-    print("✓ ResNet18 tests passed!")
+    # Test block features (hooks)
+    block4_feats = model.get_block_features(x, 'layer4')
+    assert block4_feats.shape == (4, 512, 4, 4), f"Expected (4, 512, 4, 4), got {block4_feats.shape}"
+    
+    # Test all features
+    all_feats = model.get_all_features(x)
+    assert all_feats['layer1'].shape == (4, 64, 32, 32), f"Layer1 shape mismatch"
+    assert all_feats['layer2'].shape == (4, 128, 16, 16), f"Layer2 shape mismatch"
+    assert all_feats['layer3'].shape == (4, 256, 8, 8), f"Layer3 shape mismatch"
+    assert all_feats['layer4'].shape == (4, 512, 4, 4), f"Layer4 shape mismatch"
+    assert all_feats['penultimate'].shape == (4, 512), f"Penultimate shape mismatch"
+    assert all_feats['logits'].shape == (4, 100), f"Logits shape mismatch"
+    
+    print("Hooks working correctly!")
+
+    print("ResNet18 tests passed!")
     print(f"  - Total parameters: {sum(p.numel() for p in model.parameters()):,}")
 
 
