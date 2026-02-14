@@ -6,5 +6,5 @@ __all__ = [
     'load_model', 
     'plot_training_curves',
     'create_training_gif',
-    'plot_final_metrics'
+    'plot_ood_scores'
 ]
