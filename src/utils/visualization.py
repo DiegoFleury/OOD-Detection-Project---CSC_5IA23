@@ -128,7 +128,86 @@ def create_training_gif(history, save_path='results/figures/gifs/training_curves
     imageio.mimsave(save_path, frames, fps=fps)
     print(f"GIF saved: {save_path}")
 
-
+def plot_ood_scores_per_dataset(results, save_dir=None):
+    """
+    Plot OOD detection results with separate lines for each OOD dataset
+    
+    Args:
+        results: dict with structure:
+            {
+                'config': {'epochs': [...], 'tpt_mask': [...]},
+                'scorers': {
+                    'MSP': {
+                        'SVHN': {'auroc': [...], 'fpr95': [...]},
+                        'CIFAR10': {'auroc': [...], 'fpr95': [...]},
+                        ...
+                    },
+                    ...
+                }
+            }
+        save_dir: directory to save plots
+    """
+    
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+    
+    epochs = results['config']['epochs']
+    tpt_mask = results['config']['tpt_mask']
+    ood_datasets = results['config']['ood_datasets']
+    scorers = results['scorers']
+    
+    # TPT region
+    tpt_epochs = [e for e, m in zip(epochs, tpt_mask) if m == 1]
+    tpt_start = min(tpt_epochs) if tpt_epochs else None
+    
+    # Plot per scorer (each scorer gets its own figure with subplots per dataset)
+    for scorer_name in scorers.keys():
+        fig, axes = plt.subplots(len(ood_datasets), 2, figsize=(16, 5*len(ood_datasets)))
+        
+        if len(ood_datasets) == 1:
+            axes = axes.reshape(1, -1)
+        
+        for idx, dataset_name in enumerate(ood_datasets):
+            data = scorers[scorer_name][dataset_name]
+            
+            # AUROC plot
+            ax = axes[idx, 0]
+            if scorer_name == 'NECO':
+                ax.plot(tpt_epochs, data['auroc'], '--o', linewidth=2, markersize=8)
+            else:
+                ax.plot(epochs, data['auroc'], '-o', linewidth=2, markersize=6)
+            
+            if tpt_start:
+                ax.axvspan(tpt_start, max(epochs), alpha=0.1, color='red')
+            
+            ax.set_xlabel('Epoch', fontsize=14)
+            ax.set_ylabel('AUROC', fontsize=14)
+            ax.set_title(f'{scorer_name} - {dataset_name}: AUROC', fontsize=16, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+            ax.set_ylim([0.5, 1.0])
+            
+            # FPR@95 plot
+            ax = axes[idx, 1]
+            if scorer_name == 'NECO':
+                ax.plot(tpt_epochs, data['fpr95'], '--o', linewidth=2, markersize=8)
+            else:
+                ax.plot(epochs, data['fpr95'], '-o', linewidth=2, markersize=6)
+            
+            if tpt_start:
+                ax.axvspan(tpt_start, max(epochs), alpha=0.1, color='red')
+            
+            ax.set_xlabel('Epoch', fontsize=14)
+            ax.set_ylabel('FPR@95 (%)', fontsize=14)
+            ax.set_title(f'{scorer_name} - {dataset_name}: FPR@95', fontsize=16, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, f'ood_{scorer_name}_per_dataset.png'), 
+                       dpi=300, bbox_inches='tight')
+        
+        plt.show()
 
 if __name__ == "__main__":
     # Test with dummy data

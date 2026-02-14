@@ -25,8 +25,10 @@ model:
 ood:
   datasets:
     - SVHN
-    #- CIFAR10
-    # - Textures  # 
+    - CIFAR10
+    - Textures 
+  sampling_ratio: 0.1  # Fraction of each OOD dataset to use
+  tpt_mask: [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1]  # TPT phase for NECO (last 4 checkpoints)
   
 # Paths
 paths:
@@ -36,6 +38,7 @@ paths:
   gifs: '/content/drive/MyDrive/Colab Notebooks/OOD/Results/figures/gifs'
   tables: '/content/drive/MyDrive/Colab Notebooks/OOD/Results/tables'
   metrics: '/content/drive/MyDrive/Colab Notebooks/OOD/Results/metrics'
+  ood_detection: '/content/drive/MyDrive/Colab Notebooks/OOD/Results/ood_scoring'
 
 # Device
 device: 'cuda'  

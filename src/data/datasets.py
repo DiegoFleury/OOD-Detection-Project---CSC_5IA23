@@ -7,6 +7,8 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
 import numpy as np
 
+CIFAR_100_mean = [0.5071, 0.4867, 0.4408]
+CIFAR_100_std = [0.2675, 0.2565, 0.2761]
 
 def get_cifar100_loaders(
     data_dir='./data',
@@ -31,8 +33,8 @@ def get_cifar100_loaders(
     
     # Normalization values for CIFAR-100
     normalize = transforms.Normalize(
-        mean=[0.5071, 0.4867, 0.4408],
-        std=[0.2675, 0.2565, 0.2761]
+        mean= CIFAR_100_mean,
+        std= CIFAR_100_std
     )
     
     # Training transforms (with augmentation)
@@ -122,7 +124,8 @@ def get_ood_loaders(
     ood_datasets=['SVHN', 'CIFAR10', 'Textures'], # for now, let's start with just SVHN
     data_dir='./data',
     batch_size=128,
-    num_workers=2
+    num_workers=2,
+    sampling_ratio = None
 ):
     """
     Get OOD dataset loaders
@@ -132,19 +135,20 @@ def get_ood_loaders(
         data_dir: where to download/load data
         batch_size: batch size
         num_workers: dataloader workers
+        sampling_ratio: if not None, sample this fraction from each dataset (proportional)
     
     Returns:
-        dict of {dataset_name: loader}
+        dict of {dataset_name: loader} or single concatenated loader if sampling_ratio is set
     """
     
     # CIFAR-100 normalization (apply to all OOD for consistency)
     normalize = transforms.Normalize(
-        mean=[0.5071, 0.4867, 0.4408],
-        std=[0.2675, 0.2565, 0.2761]
+        mean=CIFAR_100_mean,
+        std=CIFAR_100_std
     )
-    
+
     transform = transforms.Compose([
-        transforms.Resize(32),  # Ensure 32x32
+        transforms.Resize((32, 32)),  # Force 32x32 (not just 32)
         transforms.ToTensor(),
         normalize,
     ])
@@ -175,6 +179,14 @@ def get_ood_loaders(
         else:
             print(f"Warning: Unknown dataset {dataset_name}, skipping")
             continue
+       
+        # Apply sampling if ratio provided
+        if sampling_ratio is not None:
+            total_size = len(dataset)
+            sample_size = int(total_size * sampling_ratio)
+            indices = np.random.choice(total_size, size=sample_size, replace=False)
+            dataset = Subset(dataset, indices)
+            #print(f"{dataset_name}: sampled {sample_size}/{total_size} ({sampling_ratio*100:.1f}%)")
         
         loader = DataLoader(
             dataset,
@@ -199,9 +211,9 @@ def test_dataloaders():
     assert x.shape == (4, 3, 32, 32), f"Expected (4, 3, 32, 32), got {x.shape}"
     assert y.shape == (4,), f"Expected (4,), got {y.shape}"
     
-    print(f"✓ Train loader: {len(train_loader)} batches")
-    print(f"✓ Val loader: {len(val_loader)} batches")
-    print(f"✓ Test loader: {len(test_loader)} batches")
+    print(f"Train loader: {len(train_loader)} batches")
+    print(f"Val loader: {len(val_loader)} batches")
+    print(f"Test loader: {len(test_loader)} batches")
     
     # Test OOD loaders
     print("\nTesting OOD loaders...")
@@ -209,7 +221,7 @@ def test_dataloaders():
     
     for name, loader in ood_loaders.items():
         x, y = next(iter(loader))
-        print(f"✓ {name}: {len(loader)} batches, shape {x.shape}")
+        print(f"{name}: {len(loader)} batches, shape {x.shape}")
     
     print("\n✓ All dataloader tests passed!")
 
