@@ -250,37 +250,17 @@ def _compute_nc_metrics(
             if len(idxs) == 0:
                 continue
             h_c = h[idxs]
-            z = h_c - mean[c].unsqueeze(0)
+            z = h_c - mean[c].unsqueeze(0) # centered features
             Sw += z.T @ z
 
     total_N = sum(N)
-    Sw /= total_N
+    Sw /= total_N # intraclass covaiance matrix (normalized by total samples)
 
     # ---- Derived quantities ----
     M_T = M.T  # (D, C)
     muG = M_T.mean(dim=1, keepdim=True)  # global mean (D, 1)
     M_ = M_T - muG  # centered class means (D, C)
-    Sb = (M_ @ M_.T) / num_classes  # between-class covariance
-
-    W = classifier.weight.detach().to(device)  # (C, D)
-
-    # NC2: equinorm
-    M_norms = torch.norm(M_, dim=0)  # per-class mean norms
-    W_norms = torch.norm(W, dim=1)   # per-class classifier norms
-
-    norm_M_CoV = (torch.std(M_norms) / torch.mean(M_norms)).item()
-    norm_W_CoV = (torch.std(W_norms) / torch.mean(W_norms)).item()
-
-    # NC2: equiangularity (coherence)
-    def coherence(V: torch.Tensor, K: int) -> float:
-        """V: (D, K) columns. Measures deviation from simplex ETF."""
-        G = V.T @ V
-        G += torch.ones(K, K, device=device) / (K - 1)
-        G -= torch.diag(torch.diag(G))
-        return torch.norm(G, p=1).item() / (K * (K - 1))
-
-    cos_M_val = coherence(M_ / (M_norms + 1e-12), num_classes)
-    cos_W_val = coherence(W.T / (W_norms.unsqueeze(0) + 1e-12), num_classes)
+    Sb = (M_ @ M_.T) / num_classes  # between-class covariance  (interclass covariance matrix)
 
     # NC1: Tr{Sw @ Sb^{-1}} / C
     Sw_np = Sw.cpu().float().numpy()
@@ -293,10 +273,34 @@ def _compute_nc_metrics(
     except Exception:
         nc1 = float("nan")
 
+    W = classifier.weight.detach().to(device)  # (C, D)
+
+    # NC2: equinorm
+    M_norms = torch.norm(M_, dim=0)  # per-class mean norms
+    W_norms = torch.norm(W, dim=1)   # per-class classifier norms
+
+    norm_M_CoV = (torch.std(M_norms) / torch.mean(M_norms)).item() #CoV of mean norms -> equinorm if close to 0
+    norm_W_CoV = (torch.std(W_norms) / torch.mean(W_norms)).item() #CoV of classifier norms -> equinorm if close to 0
+
+    # NC2: equiangularity (coherence)
+    def coherence(V: torch.Tensor, K: int) -> float:
+        """V: (D, K) columns. Measures deviation from simplex ETF."""
+        G = V.T @ V
+        G += torch.ones(K, K, device=device) / (K - 1)
+        G -= torch.diag(torch.diag(G))
+        return torch.norm(G, p=1).item() / (K * (K - 1))
+
+    cos_M_val = coherence(M_ / (M_norms + 1e-12), num_classes)
+    cos_W_val = coherence(W.T / (W_norms.unsqueeze(0) + 1e-12), num_classes)
+
+    #coherence of centered means and classifiers (should both approach 0 for simplex ETF)
+
+
     # NC3: ||W^T - M_||^2 (Frobenius, normalized)
     normalized_M = M_ / (torch.norm(M_, "fro") + 1e-12)
     normalized_W = W.T / (torch.norm(W.T, "fro") + 1e-12)
-    W_M_dist = (torch.norm(normalized_W - normalized_M) ** 2).item()
+    W_M_dist = (torch.norm(normalized_W - normalized_M) ** 2).item() 
+    # must be 0 if perfect self duality
 
     # NC4: NCC mismatch
     ncc_mismatch = 1.0 - NCC_match_net / total_N
