@@ -128,16 +128,20 @@ def create_training_gif(history, save_path='results/figures/gifs/training_curves
     imageio.mimsave(save_path, frames, fps=fps)
     print(f"GIF saved: {save_path}")
 
-def plot_ood_scores(results, save_dir=None):
+def plot_ood_scores_per_dataset(results, save_dir=None):
     """
-    Plot OOD detection results
+    Plot OOD detection results with separate lines for each OOD dataset
     
     Args:
         results: dict with structure:
             {
                 'config': {'epochs': [...], 'tpt_mask': [...]},
                 'scorers': {
-                    'MSP': {'auroc': [...], 'fpr95': [...]},
+                    'MSP': {
+                        'SVHN': {'auroc': [...], 'fpr95': [...]},
+                        'CIFAR10': {'auroc': [...], 'fpr95': [...]},
+                        ...
+                    },
                     ...
                 }
             }
@@ -149,114 +153,61 @@ def plot_ood_scores(results, save_dir=None):
     
     epochs = results['config']['epochs']
     tpt_mask = results['config']['tpt_mask']
+    ood_datasets = results['config']['ood_datasets']
     scorers = results['scorers']
     
-    # TPT region (where mask == 1)
+    # TPT region
     tpt_epochs = [e for e, m in zip(epochs, tpt_mask) if m == 1]
     tpt_start = min(tpt_epochs) if tpt_epochs else None
     
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-    
-    # Plot 1: AUROC vs Epoch
-    ax = axes[0]
-    for scorer_name, data in scorers.items():
-        if scorer_name == 'NECO':
-            # NECO only in TPT
-            ax.plot(tpt_epochs, data['auroc'], 
-                   '--o', linewidth=2, markersize=8, 
-                   label=f'{scorer_name} (TPT only)')
-        else:
-            ax.plot(epochs, data['auroc'], 
-                   '-o', linewidth=2, markersize=6, 
-                   label=scorer_name)
-    
-    # Shade TPT region
-    if tpt_start:
-        ax.axvspan(tpt_start, max(epochs), alpha=0.1, color='red', label='TPT Phase')
-    
-    ax.set_xlabel('Epoch', fontsize=14)
-    ax.set_ylabel('AUROC', fontsize=14)
-    ax.set_title('OOD Detection: AUROC vs Training Epoch', fontsize=16, fontweight='bold')
-    ax.legend(fontsize=11)
-    ax.grid(True, alpha=0.3)
-    ax.set_ylim([0.5, 1.0])
-    
-    # Plot 2: FPR@95 vs Epoch
-    ax = axes[1]
-    for scorer_name, data in scorers.items():
-        if scorer_name == 'NECO':
-            ax.plot(tpt_epochs, data['fpr95'], 
-                   '--o', linewidth=2, markersize=8, 
-                   label=f'{scorer_name} (TPT only)')
-        else:
-            ax.plot(epochs, data['fpr95'], 
-                   '-o', linewidth=2, markersize=6, 
-                   label=scorer_name)
-    
-    # Shade TPT region
-    if tpt_start:
-        ax.axvspan(tpt_start, max(epochs), alpha=0.1, color='red')
-    
-    ax.set_xlabel('Epoch', fontsize=14)
-    ax.set_ylabel('FPR@95 (%)', fontsize=14)
-    ax.set_title('OOD Detection: FPR@95 vs Training Epoch', fontsize=16, fontweight='bold')
-    ax.legend(fontsize=11)
-    ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    
-    if save_dir:
-        plt.savefig(os.path.join(save_dir, 'ood_scores_evolution.png'), 
-                   dpi=300, bbox_inches='tight')
-        print(f"Plot saved: {save_dir}/ood_scores_evolution.png")
-    
-    plt.show()
-    
-    # Plot 3: Final comparison (bar plot)
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-    
-    scorer_names = list(scorers.keys())
-    final_auroc = [scorers[s]['auroc'][-1] for s in scorer_names]
-    final_fpr95 = [scorers[s]['fpr95'][-1] for s in scorer_names]
-    
-    # AUROC bars
-    ax = axes[0]
-    bars = ax.bar(scorer_names, final_auroc, color=['C0', 'C1', 'C2', 'C3', 'C4', 'C5'])
-    ax.set_ylabel('AUROC', fontsize=14)
-    ax.set_title(f'Final OOD Detection Performance (Epoch {epochs[-1]})', 
-                fontsize=16, fontweight='bold')
-    ax.set_ylim([0.5, 1.0])
-    ax.grid(True, alpha=0.3, axis='y')
-    
-    # Add value labels on bars
-    for bar, val in zip(bars, final_auroc):
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2., height,
-               f'{val:.3f}', ha='center', va='bottom', fontsize=11)
-    
-    # FPR@95 bars
-    ax = axes[1]
-    bars = ax.bar(scorer_names, final_fpr95, color=['C0', 'C1', 'C2', 'C3', 'C4', 'C5'])
-    ax.set_ylabel('FPR@95 (%)', fontsize=14)
-    ax.set_title(f'False Positive Rate @ 95% TPR (Epoch {epochs[-1]})', 
-                fontsize=16, fontweight='bold')
-    ax.grid(True, alpha=0.3, axis='y')
-    
-    # Add value labels on bars
-    for bar, val in zip(bars, final_fpr95):
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2., height,
-               f'{val:.1f}%', ha='center', va='bottom', fontsize=11)
-    
-    plt.tight_layout()
-    
-    if save_dir:
-        plt.savefig(os.path.join(save_dir, 'ood_scores_final.png'), 
-                   dpi=300, bbox_inches='tight')
-        print(f"Plot saved: {save_dir}/ood_scores_final.png")
-    
-    plt.show()
-
+    # Plot per scorer (each scorer gets its own figure with subplots per dataset)
+    for scorer_name in scorers.keys():
+        fig, axes = plt.subplots(len(ood_datasets), 2, figsize=(16, 5*len(ood_datasets)))
+        
+        if len(ood_datasets) == 1:
+            axes = axes.reshape(1, -1)
+        
+        for idx, dataset_name in enumerate(ood_datasets):
+            data = scorers[scorer_name][dataset_name]
+            
+            # AUROC plot
+            ax = axes[idx, 0]
+            if scorer_name == 'NECO':
+                ax.plot(tpt_epochs, data['auroc'], '--o', linewidth=2, markersize=8)
+            else:
+                ax.plot(epochs, data['auroc'], '-o', linewidth=2, markersize=6)
+            
+            if tpt_start:
+                ax.axvspan(tpt_start, max(epochs), alpha=0.1, color='red')
+            
+            ax.set_xlabel('Epoch', fontsize=14)
+            ax.set_ylabel('AUROC', fontsize=14)
+            ax.set_title(f'{scorer_name} - {dataset_name}: AUROC', fontsize=16, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+            ax.set_ylim([0.5, 1.0])
+            
+            # FPR@95 plot
+            ax = axes[idx, 1]
+            if scorer_name == 'NECO':
+                ax.plot(tpt_epochs, data['fpr95'], '--o', linewidth=2, markersize=8)
+            else:
+                ax.plot(epochs, data['fpr95'], '-o', linewidth=2, markersize=6)
+            
+            if tpt_start:
+                ax.axvspan(tpt_start, max(epochs), alpha=0.1, color='red')
+            
+            ax.set_xlabel('Epoch', fontsize=14)
+            ax.set_ylabel('FPR@95 (%)', fontsize=14)
+            ax.set_title(f'{scorer_name} - {dataset_name}: FPR@95', fontsize=16, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, f'ood_{scorer_name}_per_dataset.png'), 
+                       dpi=300, bbox_inches='tight')
+        
+        plt.show()
 
 if __name__ == "__main__":
     # Test with dummy data

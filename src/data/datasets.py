@@ -146,9 +146,9 @@ def get_ood_loaders(
         mean=CIFAR_100_mean,
         std=CIFAR_100_std
     )
-    
+
     transform = transforms.Compose([
-        transforms.Resize(32),  # Ensure 32x32
+        transforms.Resize((32, 32)),  # Force 32x32 (not just 32)
         transforms.ToTensor(),
         normalize,
     ])
@@ -186,7 +186,7 @@ def get_ood_loaders(
             sample_size = int(total_size * sampling_ratio)
             indices = np.random.choice(total_size, size=sample_size, replace=False)
             dataset = Subset(dataset, indices)
-            print(f"{dataset_name}: sampled {sample_size}/{total_size} ({sampling_ratio*100:.1f}%)")
+            #print(f"{dataset_name}: sampled {sample_size}/{total_size} ({sampling_ratio*100:.1f}%)")
         
         loader = DataLoader(
             dataset,
