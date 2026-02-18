@@ -1,7 +1,3 @@
-"""
-OOD Detection Scorers
-"""
-
 from .base import BaseOODScorer
 from .output_based import MSPScorer, MaxLogitScorer, EnergyScorer
 from .distance_based import MahalanobisScorer

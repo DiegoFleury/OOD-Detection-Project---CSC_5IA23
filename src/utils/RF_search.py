@@ -1,8 +1,3 @@
-"""
-Hyperparameter search for ResNet-18 b1 on CIFAR-100
-Find optimal configuration for recommended RF range
-"""
-
 import itertools
 import pandas as pd
 

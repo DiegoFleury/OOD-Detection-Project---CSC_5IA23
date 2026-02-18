@@ -1,27 +1,3 @@
-"""
-Neural Collapse Analysis Module
-================================
-Computes NC1–NC4 metrics across training checkpoints for a ResNet model.
-
-Usage (from notebook):
-    from src.neural_collapse.nc_analysis import (
-        load_checkpoints_and_analyze,
-        plot_nc_evolution,
-        plot_nc_individual,
-        save_metrics_yaml,
-        NCMetricsTracker,
-    )
-
-    tracker = load_checkpoints_and_analyze(
-        checkpoint_dir="checkpoints/",
-        model_class=ResNet18,
-        loader=train_loader,
-        device="cuda",
-        num_classes=100,
-    )
-    fig = plot_nc_evolution(tracker, save_dir="figures/nc/")
-"""
-
 from __future__ import annotations
 
 import glob
@@ -46,8 +22,6 @@ from tqdm import tqdm
 
 @dataclass
 class NCMetricsTracker:
-    """Accumulates Neural Collapse metrics over training epochs."""
-
     epochs: List[int] = field(default_factory=list)
     accuracy: List[float] = field(default_factory=list)
     loss: List[float] = field(default_factory=list)
@@ -69,7 +43,6 @@ class NCMetricsTracker:
 
     # ------------------------------------------------------------------
     def summary(self) -> str:
-        """Return a human-readable summary of the tracked metrics."""
         lines = [
             "=" * 60,
             "NEURAL COLLAPSE METRICS SUMMARY",
@@ -94,7 +67,6 @@ class NCMetricsTracker:
         return "\n".join(lines)
 
     def to_dict(self) -> dict:
-        """Export all metrics as a plain dictionary."""
         return {
             "epochs": list(self.epochs),
             "accuracy": list(self.accuracy),
@@ -114,8 +86,6 @@ class NCMetricsTracker:
 # ==========================================================================
 
 class _FeatureHook:
-    """Forward-hook that captures the *input* to the last linear layer."""
-
     def __init__(self):
         self.features: Optional[torch.Tensor] = None
 
@@ -124,12 +94,6 @@ class _FeatureHook:
 
 
 def _find_classifier(model: nn.Module) -> nn.Linear:
-    """Find the last Linear layer (classifier head) of the model.
-
-    Tries common attribute names used by different ResNet implementations:
-    ``fc``, ``linear``, ``classifier``, ``head``.
-    Falls back to scanning all modules for the last ``nn.Linear``.
-    """
     for attr in ("fc", "linear", "classifier", "head"):
         layer = getattr(model, attr, None)
         if isinstance(layer, nn.Linear):
@@ -145,13 +109,12 @@ def _find_classifier(model: nn.Module) -> nn.Linear:
 
     raise RuntimeError(
         "Could not find the classifier (nn.Linear) layer in the model. "
-        "Please ensure the model has an attribute named 'fc', 'linear', "
+        "The model should have an attribute named 'fc', 'linear', "
         "'classifier', or 'head'."
     )
 
 
 def _load_checkpoint(path: str, model: nn.Module, device: str) -> None:
-    """Load a checkpoint into *model*, handling various checkpoint formats."""
     ckpt = torch.load(path, map_location=device, weights_only=False)
 
     if isinstance(ckpt, dict):
@@ -186,7 +149,6 @@ def _compute_nc_metrics(
     device: str,
     num_classes: int,
 ) -> dict:
-    """Run a full forward pass over *loader* and return NC1–NC4 metrics."""
     model.eval()
 
     N = [0] * num_classes
@@ -282,7 +244,7 @@ def _compute_nc_metrics(
     cos_M_val = coherence(M_ / (M_norms + 1e-12), num_classes)
     cos_W_val = coherence(W.T / (W_norms.unsqueeze(0) + 1e-12), num_classes)
 
-    # NC1: Tr{Σ_W @ Σ_B†} / C  (Moore-Penrose pseudoinverse)
+    # NC1 
     Sw_np = Sw.cpu().float().numpy()
     Sb_np = Sb.cpu().float().numpy()
     try:
@@ -293,12 +255,12 @@ def _compute_nc_metrics(
     except Exception:
         nc1 = float("nan")
 
-    # NC3: ||W^T - M_||^2 (Frobenius, normalized)
+    # NC3
     normalized_M = M_ / (torch.norm(M_, "fro") + 1e-12)
     normalized_W = W.T / (torch.norm(W.T, "fro") + 1e-12)
     W_M_dist = (torch.norm(normalized_W - normalized_M) ** 2).item()
 
-    # NC4: NCC mismatch
+    # NC4 (NCC mismatch)
     ncc_mismatch = 1.0 - NCC_match_net / total_N
 
     return {
@@ -328,32 +290,7 @@ def load_checkpoints_and_analyze(
     epoch_regex: str = r"epoch(\d+)",
     verbose: bool = True,
 ) -> NCMetricsTracker:
-    """Load every checkpoint matching *pattern*, compute NC metrics, return tracker.
 
-    Parameters
-    ----------
-    checkpoint_dir : str
-        Directory containing ``.pth`` checkpoint files.
-    model_class : type
-        Model constructor — called as ``model_class(num_classes=num_classes)``.
-    loader : DataLoader
-        Training (or validation) data loader used for feature extraction.
-    device : str
-        ``"cuda"`` or ``"cpu"``.
-    num_classes : int
-        Number of classes (e.g. 100 for CIFAR-100).
-    checkpoint_pattern : str
-        Glob pattern for checkpoint files.
-    epoch_regex : str
-        Regex with one capture group to extract the epoch number from filenames.
-    verbose : bool
-        If True, print progress.
-
-    Returns
-    -------
-    NCMetricsTracker
-        Populated tracker with per-epoch NC metrics.
-    """
     # Discover & sort checkpoints
     paths = glob.glob(os.path.join(checkpoint_dir, checkpoint_pattern))
     if not paths:
@@ -411,7 +348,6 @@ def plot_nc_evolution(
     tracker: NCMetricsTracker,
     save_dir: Optional[str] = None,
 ) -> plt.Figure:
-    """Plot all NC metrics in a single 2×3 figure. Returns the Figure."""
     epochs = tracker.epochs
 
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
@@ -450,7 +386,7 @@ def plot_nc_evolution(
     ax.plot(epochs, tracker.W_M_dist, "c-o", markersize=3)
     ax.set_xlabel("Epoch")
     ax.set_ylabel(r"$\|W^T - \bar{M}\|^2$ (normalized)")
-    ax.set_title("NC3: Self-Duality (W ≈ M)")
+    ax.set_title("NC3: Self-Duality (W ~ M)")
     ax.grid(True, alpha=0.3)
 
     # (1,1) NC4 — NCC
@@ -484,7 +420,6 @@ def plot_nc_individual(
     tracker: NCMetricsTracker,
     save_dir: Optional[str] = None,
 ) -> dict:
-    """Generate one figure per NC metric. Returns dict[name → Figure]."""
     epochs = tracker.epochs
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
@@ -540,10 +475,8 @@ def plot_nc_individual(
 # ==========================================================================
 
 def save_metrics_yaml(tracker: NCMetricsTracker, path: str) -> None:
-    """Save the tracker metrics to a YAML file."""
     data = tracker.to_dict()
 
-    # Convert NaN → None for clean YAML output
     for key, values in data.items():
         if isinstance(values, list):
             data[key] = [

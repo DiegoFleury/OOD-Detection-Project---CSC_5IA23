@@ -1,13 +1,3 @@
-"""
-Neural Collapse analysis package.
-
-Submodules
-----------
-nc_analysis      : NC1–NC4 metric computation across checkpoints (ID only).
-nc_ood           : NC5 (ID/OOD orthogonality) + NC1/NC2 with OOD + PCA projections.
-nc_earlier_layer : Layer-wise NC1–NC5 across network depth.
-"""
-
 from .nc_analysis import (
     NCMetricsTracker,
     load_checkpoints_and_analyze,

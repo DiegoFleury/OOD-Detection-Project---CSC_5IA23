@@ -38,7 +38,6 @@ class NECOScorer(BaseFeatureScorer):
         norm_projected = torch.norm(reconstructed, dim=1)  # [B]
         norm_original = torch.norm(features, dim=1)        # [B]
 
-        # NECO = ||Ph(x)|| / ||h(x)|| -> higher = more ID
         # Negate so higher = more OOD
         return -(norm_projected / (norm_original + 1e-8))
 

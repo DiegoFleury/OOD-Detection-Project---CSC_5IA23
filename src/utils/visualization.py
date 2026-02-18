@@ -1,13 +1,8 @@
-"""
-Visualization utilities for training curves, OOD metrics, and Neural Collapse
-"""
-
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import os
 import imageio
-
 
 sns.set_style('whitegrid')
 plt.rcParams['figure.figsize'] = (12, 6)

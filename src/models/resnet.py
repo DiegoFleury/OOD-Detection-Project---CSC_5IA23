@@ -1,16 +1,9 @@
-"""
-ResNet-18 implementation for CIFAR-100
-Adapted for 32x32 images (original ResNet is for 224x224 ImageNet)
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
 class BasicBlock(nn.Module):
-    """Basic residual block for ResNet-18/34"""
-
     def __init__(self, in_channels, out_channels, stride=1):
         super(BasicBlock, self).__init__()
         
@@ -49,16 +42,6 @@ class BasicBlock(nn.Module):
 
 
 class ResNet18(nn.Module):
-    """
-    ResNet-18 adapted for CIFAR-100 (32x32 images)
-    
-    Architecture:
-    - Initial conv: 3x3, stride 1 (no max pooling for small images)
-    - 4 layer groups: [64, 128, 256, 512] channels
-    - Each group has 2 BasicBlocks
-    - Global average pooling
-    - Fully connected classifier
-    """
     
     def __init__(self, num_classes=100):
         super(ResNet18, self).__init__()
@@ -88,7 +71,6 @@ class ResNet18(nn.Module):
         self._register_hooks()
     
     def _register_hooks(self):
-        """Register forward hooks to capture block outputs"""
         def get_hook(name):
             def hook(module, input, output):
                 self._features[name] = output.detach()
@@ -100,7 +82,6 @@ class ResNet18(nn.Module):
         self.layer4.register_forward_hook(get_hook('layer4'))
     
     def _make_layer(self, out_channels, num_blocks, stride):
-        """Create a layer group with multiple blocks"""
         layers = []
         
         # First block may downsample
@@ -114,7 +95,6 @@ class ResNet18(nn.Module):
         return nn.Sequential(*layers)
     
     def _initialize_weights(self):
-        """Kaiming initialization for conv layers"""
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -126,16 +106,7 @@ class ResNet18(nn.Module):
                 nn.init.constant_(m.bias, 0)
     
     def forward(self, x, return_features=False):
-        """
-        Forward pass
-        
-        Args:
-            x: input images [B, 3, 32, 32]
-            return_features: if True, return (logits, features)
-        
-        Returns:
-            logits [B, num_classes] or (logits, features)
-        """
+
         # Initial conv
         x = F.relu(self.bn1(self.conv1(x)))
         
@@ -156,47 +127,21 @@ class ResNet18(nn.Module):
             return logits, features
         return logits
     
+    # --------------- Important to use no grad for getters --------------- #
     def get_features(self, x):
-        """Extract penultimate layer features (before classifier)"""
         with torch.no_grad():
             _, features = self.forward(x, return_features=True)
         return features
     
     def get_classifier_weights(self):
-        """Get classifier weight matrix [num_classes, 512]"""
         return self.fc.weight.data
     
     def get_block_features(self, x, block_name='layer4'):
-        """
-        Extract features from a specific block
-        
-        Args:
-            x: input images [B, 3, H, W]
-            block_name: 'layer1', 'layer2', 'layer3', or 'layer4'
-        
-        Returns:
-            features from specified block [B, C, H, W]
-        """
         with torch.no_grad():
             _ = self.forward(x)
         return self._features.get(block_name)
 
     def get_all_features(self, x):
-        """
-        Get features from all layers in a single forward pass
-
-        Args:
-            x: input images [B, 3, H, W]
-
-        Returns:
-            dict with:
-                'layer1': [B, 64, 32, 32]
-                'layer2': [B, 128, 16, 16]
-                'layer3': [B, 256, 8, 8]
-                'layer4': [B, 512, 4, 4]
-                'penultimate': [B, 512] (after avgpool)
-                'logits': [B, 100]
-        """
         with torch.no_grad():
             logits, penultimate = self.forward(x, return_features=True)
 
@@ -208,30 +153,25 @@ class ResNet18(nn.Module):
             'penultimate': penultimate,
             'logits': logits
         }
+    # --------------- --------------- --------------- --------------- #
 
 
 def test_resnet18():
-    """Quick test of ResNet-18"""
     model = ResNet18(num_classes=100)
     x = torch.randn(4, 3, 32, 32)
     
-    # Test forward pass
     logits = model(x)
-    assert logits.shape == (4, 100), f"Expected (4, 100), got {logits.shape}"
+    assert logits.shape == (4, 100), f"Got {logits.shape}" 
     
-    # Test feature extraction
     features = model.get_features(x)
-    assert features.shape == (4, 512), f"Expected (4, 512), got {features.shape}"
+    assert features.shape == (4, 512), f"Got {features.shape}" 
     
-    # Test classifier weights
     weights = model.get_classifier_weights()
-    assert weights.shape == (100, 512), f"Expected (100, 512), got {weights.shape}"
+    assert weights.shape == (100, 512), f"Got {weights.shape}" 
     
-    # Test block features (hooks)
     block4_feats = model.get_block_features(x, 'layer4')
-    assert block4_feats.shape == (4, 512, 4, 4), f"Expected (4, 512, 4, 4), got {block4_feats.shape}"
+    assert block4_feats.shape == (4, 512, 4, 4), f"Got {block4_feats.shape}"
     
-    # Test all features
     all_feats = model.get_all_features(x)
     assert all_feats['layer1'].shape == (4, 64, 32, 32), f"Layer1 shape mismatch"
     assert all_feats['layer2'].shape == (4, 128, 16, 16), f"Layer2 shape mismatch"
@@ -240,9 +180,6 @@ def test_resnet18():
     assert all_feats['penultimate'].shape == (4, 512), f"Penultimate shape mismatch"
     assert all_feats['logits'].shape == (4, 100), f"Logits shape mismatch"
     
-    print("Hooks working correctly!")
-
-    print("ResNet18 tests passed!")
     print(f"  - Total parameters: {sum(p.numel() for p in model.parameters()):,}")
 
 

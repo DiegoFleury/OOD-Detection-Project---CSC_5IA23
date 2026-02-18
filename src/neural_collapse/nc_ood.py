@@ -1,35 +1,3 @@
-"""
-Neural Collapse with OOD Data — NC5 Analysis
-==============================================
-Computes NC5 (ID/OOD Orthogonality) and NC1/NC2 in the presence of OOD data
-across training checkpoints.
-
-Reference:
-    Ben Ammar et al., "NECO: Neural Collapse Based Out-of-Distribution Detection"
-    ICLR 2024.  (arXiv:2310.06823)  —  Section 4, eq. 5, Appendix D.
-
-Usage (from notebook)::
-
-    from src.neural_collapse.nc_ood import (
-        load_checkpoints_and_analyze_ood,
-        plot_nc5_convergence,
-        plot_ood_summary,
-        save_ood_metrics_yaml,
-        NCOODTracker,
-    )
-
-    tracker = load_checkpoints_and_analyze_ood(
-        checkpoint_dir="checkpoints/",
-        model_class=ResNet18,
-        id_loader=train_loader,
-        ood_loader=svhn_loader,
-        device="cuda",
-        num_classes=100,
-    )
-    plot_nc5_convergence(tracker, ood_name="SVHN")
-    plot_ood_summary(tracker, ood_name="SVHN")
-"""
-
 from __future__ import annotations
 
 import glob
@@ -37,6 +5,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Type
+from sklearn.decomposition import PCA
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -45,6 +14,9 @@ import torch.nn as nn
 import yaml
 from scipy.sparse.linalg import svds
 from tqdm import tqdm
+import plotly.graph_objects as go
+import plotly.express as px
+
 
 from .nc_analysis import _FeatureHook, _find_classifier, _load_checkpoint
 
@@ -55,26 +27,6 @@ from .nc_analysis import _FeatureHook, _find_classifier, _load_checkpoint
 
 @dataclass
 class NCOODTracker:
-    """Tracks NC metrics in the presence of OOD data across epochs.
-
-    Attributes
-    ----------
-    epochs : list[int]
-        Epoch numbers analysed.
-    nc5_orthodev : list[float]
-        NC5 ID/OOD orthogonality deviation (eq. 5).
-        Lower → more orthogonal → better separation.
-    Sw_invSb_id_only : list[float]
-        NC1 Tr(Σ_W Σ_B†)/C on ID data only.
-    Sw_invSb_id_ood : list[float]
-        NC1 treating OOD as an extra class (C+1).
-    nc2_equiang_id_only : list[float]
-        NC2 equiangularity on ID only.
-    nc2_equiang_id_ood : list[float]
-        NC2 equiangularity with OOD as extra class.
-    nc2_equinorm_id : list[float]
-        NC2 equinorm (class means CoV) on ID only.
-    """
 
     epochs: List[int] = field(default_factory=list)
 
@@ -134,19 +86,6 @@ def _compute_nc5(
     id_means: torch.Tensor,
     ood_global_mean: torch.Tensor,
 ) -> float:
-    """Compute NC5 OrthoDev (eq. 5 from NECO paper).
-
-    OrthoDev = Avg_c | <µ_c, µ^OOD_G> / (||µ_c|| · ||µ^OOD_G||) |
-
-    Parameters
-    ----------
-    id_means : (C, D) — per-class means of ID data (NOT centered).
-    ood_global_mean : (D,) — global mean of OOD features.
-
-    Returns
-    -------
-    float   Should → 0 if NC5 is satisfied.
-    """
     mu_ood_norm = torch.norm(ood_global_mean)
     if mu_ood_norm < 1e-12:
         return 0.0
@@ -170,7 +109,6 @@ def _compute_nc5(
 # ==========================================================================
 
 def _coherence(V: torch.Tensor, K: int, device: str) -> float:
-    """Equiangularity: deviation from simplex ETF.  V : (D, K) col-normalized."""
     G = V.T @ V
     G += torch.ones(K, K, device=device) / (K - 1)
     G -= torch.diag(torch.diag(G))
@@ -190,14 +128,7 @@ def _compute_nc_ood_metrics(
     device: str,
     num_classes: int,
 ) -> dict:
-    """Compute NC1, NC2, NC5 with OOD treated as an extra class.
 
-    Implements Section 4 and Appendix D of the NECO paper:
-    - NC1 on ID only and on ID+OOD (OOD = class C)
-    - NC2 equiangularity on ID only and on ID+OOD
-    - NC2 equinorm on ID class means
-    - NC5 OrthoDev (eq. 5)
-    """
     model.eval()
     C = num_classes
     C_total = C + 1
@@ -294,7 +225,7 @@ def _compute_nc_ood_metrics(
     Sw_id_avg = Sw_id / max(total_N_id, 1)
     Sw_all_avg = (Sw_id + Sw_ood) / max(total_N_id + N_ood, 1)
 
-    # ---- NC1: Tr{Σ_W Σ_B†} / C ----
+    # ---- NC1 ----
     def _nc1(Sw_np, Sb_np, n_classes):
         try:
             k = min(n_classes - 1, D - 1)
@@ -335,27 +266,7 @@ def load_checkpoints_and_analyze_ood(
     epoch_regex: str = r"epoch(\d+)",
     verbose: bool = True,
 ) -> NCOODTracker:
-    """Analyze NC5 + NC1/NC2 across training checkpoints with OOD data.
 
-    Parameters
-    ----------
-    checkpoint_dir : str
-        Directory containing checkpoint files.
-    model_class : type
-        Called as ``model_class(num_classes=num_classes)``.
-    id_loader, ood_loader : DataLoader
-        ID training data and OOD data.
-    device : str
-    num_classes : int
-        Number of ID classes.
-    checkpoint_pattern, epoch_regex : str
-        For discovering and sorting checkpoint files.
-    verbose : bool
-
-    Returns
-    -------
-    NCOODTracker
-    """
     paths = glob.glob(os.path.join(checkpoint_dir, checkpoint_pattern))
     if not paths:
         raise FileNotFoundError(
@@ -416,7 +327,6 @@ def plot_nc5_convergence(
     id_name: str = "ID",
     save_dir: Optional[str] = None,
 ) -> plt.Figure:
-    """Plot NC5 OrthoDev convergence (cf. Fig 1 / D.11 of NECO paper)."""
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(
         tracker.epochs, tracker.nc5_orthodev,
@@ -447,7 +357,7 @@ def plot_ood_summary(
     ood_name: str = "OOD",
     save_dir: Optional[str] = None,
 ) -> plt.Figure:
-    """Plot 2×3 grid: NC5, NC1 (ID vs ID+OOD), NC2 equiang, NC2 equinorm."""
+
     epochs = tracker.epochs
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     fig.suptitle(
@@ -528,7 +438,6 @@ def plot_ood_summary(
 # ==========================================================================
 
 def save_ood_metrics_yaml(tracker: NCOODTracker, path: str) -> None:
-    """Save OOD tracker metrics to YAML."""
     data = tracker.to_dict()
     for key, values in data.items():
         if isinstance(values, list):
@@ -554,14 +463,7 @@ def _extract_features(
     device: str,
     max_samples: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Forward-pass *loader* and collect penultimate features.
 
-    Returns
-    -------
-    features : (N, D)
-    labels   : (N,)
-    logits   : (N, C)
-    """
     model.eval()
     all_h, all_y, all_logits = [], [], []
     n = 0
@@ -606,13 +508,6 @@ def plot_pca_2d(
     max_samples: int = 2000,
     save_dir: Optional[str] = None,
 ) -> plt.Figure:
-    """PCA 2-D projection of ID + OOD penultimate features.
-
-    Reproduces Figure 2 / D.14 from the NECO paper:
-    - ID samples coloured by class, OOD in gray.
-    - Under NC, OOD projects near the origin.
-    """
-    from sklearn.decomposition import PCA
 
     model.to(device).eval()
     classifier = _find_classifier(model)
@@ -689,39 +584,6 @@ def plot_pca_3d_interactive(
     show_ood_mean: bool = True,
     save_path: Optional[str] = None,
 ):
-    """Interactive 3D PCA scatter of ID + OOD features (Plotly).
-
-    Visualises NC5 (ID/OOD orthogonality):
-    - ID class means form a simplex ETF structure
-    - OOD global mean should be near the origin / orthogonal to the ID subspace
-
-    Parameters
-    ----------
-    model, id_loader, ood_loader, device, num_classes : standard
-    id_train_loader : DataLoader, optional
-        If given, PCA is fitted on training features (recommended).
-    id_name, ood_name : str
-    max_samples : int
-    show_class_means : bool
-        Plot large markers for per-class means.
-    show_ood_mean : bool
-        Plot star for OOD global mean + line from origin.
-    save_path : str, optional
-        If given, save standalone HTML file.
-
-    Returns
-    -------
-    plotly.graph_objects.Figure  (call ``.show()`` in notebook)
-    """
-    try:
-        import plotly.graph_objects as go
-        import plotly.express as px
-    except ImportError:
-        raise ImportError(
-            "plotly is required for 3D interactive plots. "
-            "Install with: pip install plotly"
-        )
-    from sklearn.decomposition import PCA
 
     model.to(device).eval()
     classifier = _find_classifier(model)
@@ -809,7 +671,7 @@ def plot_pca_3d_interactive(
             x=[ood_mean_3d[0]], y=[ood_mean_3d[1]], z=[ood_mean_3d[2]],
             mode="markers",
             marker=dict(size=10, color="red", symbol="diamond"),
-            name=f"{ood_name} global mean (µ_G^OOD)",
+            name=f"{ood_name} global mean (mu_G^OOD)",
             hovertemplate=(
                 f"{ood_name} global mean<br>"
                 "PC1=%{x:.2f}<br>PC2=%{y:.2f}<br>PC3=%{z:.2f}"
@@ -821,7 +683,7 @@ def plot_pca_3d_interactive(
             x=[0, ood_mean_3d[0]], y=[0, ood_mean_3d[1]], z=[0, ood_mean_3d[2]],
             mode="lines",
             line=dict(color="red", width=4, dash="dash"),
-            name="Origin → µ_G^OOD",
+            name="Origin -> mu_G^OOD",
             showlegend=False,
         ))
 
@@ -836,7 +698,7 @@ def plot_pca_3d_interactive(
     fig.update_layout(
         title=dict(
             text=(
-                f"3D PCA — {id_name} vs {ood_name}<br>"
+                f"3D PCA - {id_name} vs {ood_name}<br>"
                 f"<sub>Var explained: PC1={var_pct[0]:.1f}%, "
                 f"PC2={var_pct[1]:.1f}%, PC3={var_pct[2]:.1f}%</sub>"
             ),

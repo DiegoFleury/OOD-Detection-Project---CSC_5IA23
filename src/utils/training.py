@@ -1,7 +1,3 @@
-"""
-Training utilities for ResNet-18 on CIFAR-100
-"""
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -9,18 +5,10 @@ from tqdm import tqdm
 import numpy as np
 import os
 
+from src.models import ResNet18
+
 
 class Trainer:
-    """
-    Trainer class for ResNet-18 on CIFAR-100
-    
-    Features:
-    - Training loop with validation
-    - Learning rate scheduling
-    - Early stopping
-    - Checkpoint saving
-    - Training history tracking
-    """
     
     def __init__(
         self,
@@ -33,17 +21,6 @@ class Trainer:
         weight_decay=5e-4,
         device='cuda' if torch.cuda.is_available() else 'cpu'
     ):
-        """
-        Args:
-            model: ResNet-18 model
-            train_loader: training dataloader
-            val_loader: validation dataloader
-            test_loader: optional test dataloader
-            lr: initial learning rate
-            momentum: SGD momentum
-            weight_decay: L2 regularization
-            device: 'cuda' or 'cpu'
-        """
         self.model = model.to(device)
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -77,7 +54,6 @@ class Trainer:
         self.best_epoch = 0
     
     def train_epoch(self):
-        """Train for one epoch"""
         self.model.train()
         
         running_loss = 0.0
@@ -116,7 +92,6 @@ class Trainer:
     
     @torch.no_grad()
     def validate(self, loader=None):
-        """Validate on validation or test set"""
         if loader is None:
             loader = self.val_loader
         
@@ -152,18 +127,7 @@ class Trainer:
         return epoch_loss, epoch_acc
     
     def train(self, epochs=200, save_dir='checkpoints', early_stopping_patience=20, checkpoint_frequency=25):
-        """
-        Full training loop
-        
-        Args:
-            epochs: number of epochs
-            save_dir: where to save checkpoints
-            early_stopping_patience: epochs to wait before early stopping
-            checkpoint_frequency: save checkpoint every N epochs
-        
-        Returns:
-            history dict
-        """
+
         os.makedirs(save_dir, exist_ok=True)
         
         # Set scheduler T_max based on total epochs
@@ -240,7 +204,6 @@ class Trainer:
         return self.history
     
     def save_checkpoint(self, path):
-        """Save model checkpoint"""
         checkpoint = {
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
@@ -257,7 +220,6 @@ class Trainer:
         print(f"Checkpoint saved: {path}")
     
     def load_checkpoint(self, path):
-        """Load model checkpoint"""
         checkpoint = torch.load(path, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -274,18 +236,6 @@ class Trainer:
 
 
 def load_model(checkpoint_path, num_classes=100, device='cuda'):
-    """
-    Utility function to load a trained model
-    
-    Args:
-        checkpoint_path: path to checkpoint
-        num_classes: number of classes
-        device: 'cuda' or 'cpu'
-    
-    Returns:
-        model, history
-    """
-    from src.models import ResNet18
     
     model = ResNet18(num_classes=num_classes).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)

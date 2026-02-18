@@ -1,8 +1,3 @@
-"""
-Dataset loaders for CIFAR-100 (ID) and OOD datasets
-"""
-
-import torch
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
 import numpy as np
@@ -17,20 +12,6 @@ def get_cifar100_loaders(
     augment=True,
     val_split=0.1
 ):
-    """
-    Get CIFAR-100 train/val/test loaders
-    
-    Args:
-        data_dir: where to download/load data
-        batch_size: batch size
-        num_workers: dataloader workers
-        augment: use data augmentation for training
-        val_split: fraction of train set to use for validation
-    
-    Returns:
-        train_loader, val_loader, test_loader
-    """
-    
     # Normalization values for CIFAR-100
     normalize = transforms.Normalize(
         mean= CIFAR_100_mean,
@@ -127,20 +108,6 @@ def get_ood_loaders(
     num_workers=2,
     sampling_ratio = None
 ):
-    """
-    Get OOD dataset loaders
-    
-    Args:
-        ood_datasets: list of OOD dataset names
-        data_dir: where to download/load data
-        batch_size: batch size
-        num_workers: dataloader workers
-        sampling_ratio: if not None, sample this fraction from each dataset (proportional)
-    
-    Returns:
-        dict of {dataset_name: loader} or single concatenated loader if sampling_ratio is set
-    """
-    
     # CIFAR-100 normalization (apply to all OOD for consistency)
     normalize = transforms.Normalize(
         mean=CIFAR_100_mean,
@@ -167,17 +134,13 @@ def get_ood_loaders(
             )
         
         elif dataset_name == 'Textures':
-            # DTD (Describable Textures Dataset)
-            try:
-                dataset = datasets.DTD(
-                    root=data_dir, split='test', download=True, transform=transform
-                )
-            except:
-                print(f"Warning: DTD not available, skipping {dataset_name}")
-                continue
-        
+            
+            dataset = datasets.DTD(
+                root=data_dir, split='test', download=True, transform=transform
+            )
+            
         else:
-            print(f"Warning: Unknown dataset {dataset_name}, skipping")
+            print(f"Unknown dataset {dataset_name}, skipping")
             continue
        
         # Apply sampling if ratio provided
@@ -202,29 +165,24 @@ def get_ood_loaders(
 
 
 def test_dataloaders():
-    """Quick test of dataloaders"""
-    print("Testing CIFAR-100 loaders...")
     train_loader, val_loader, test_loader = get_cifar100_loaders(batch_size=4)
     
     # Test train loader
     x, y = next(iter(train_loader))
-    assert x.shape == (4, 3, 32, 32), f"Expected (4, 3, 32, 32), got {x.shape}"
-    assert y.shape == (4,), f"Expected (4,), got {y.shape}"
+    assert x.shape == (4, 3, 32, 32), f"Got {x.shape}" # (4, 3, 32, 32)
+    assert y.shape == (4,), f"Got {y.shape}" # (4,)
     
-    print(f"Train loader: {len(train_loader)} batches")
-    print(f"Val loader: {len(val_loader)} batches")
-    print(f"Test loader: {len(test_loader)} batches")
+    print(len(train_loader))
+    print(len(val_loader))
+    print(len(test_loader))
     
     # Test OOD loaders
-    print("\nTesting OOD loaders...")
     ood_loaders = get_ood_loaders(ood_datasets=['SVHN', 'CIFAR10'], batch_size=4)
     
     for name, loader in ood_loaders.items():
         x, y = next(iter(loader))
         print(f"{name}: {len(loader)} batches, shape {x.shape}")
     
-    print("\n✓ All dataloader tests passed!")
-
 
 if __name__ == "__main__":
     test_dataloaders()

@@ -1,35 +1,3 @@
-"""
-NECO: Neural Collapse Based Out-of-Distribution Detection
-==========================================================
-Implements the NECO score (eq. 6), baseline OOD methods (MSP, MaxLogit, Energy),
-evaluation metrics (AUROC, FPR95), and visualisation utilities.
-
-Reference:
-    Ben Ammar et al., "NECO: Neural Collapse Based Out-of-Distribution Detection"
-    ICLR 2024.  (arXiv:2310.06823)  —  eq. 6, Section 5.
-
-Usage (from notebook)::
-
-    from src.neural_collapse.neco import (
-        compute_neco_scores,
-        compute_baseline_scores,
-        evaluate_ood_detection,
-        plot_neco_distributions,
-        plot_neco_pca_2d,
-        NECOResult,
-    )
-
-    result = compute_neco_scores(
-        model=model,
-        id_loader=test_loader,
-        ood_loader=svhn_loader,
-        device="cuda",
-        num_classes=100,
-        id_train_loader=train_loader,
-    )
-    print(f"AUROC: {result.auroc:.4f}  FPR95: {result.fpr95:.4f}")
-    plot_neco_distributions(result, id_name="CIFAR-100", ood_name="SVHN")
-"""
 
 from __future__ import annotations
 
@@ -53,17 +21,6 @@ from .nc_analysis import _FeatureHook, _find_classifier
 
 @dataclass
 class NECOResult:
-    """Holds the output of a NECO evaluation.
-
-    Attributes
-    ----------
-    id_scores : np.ndarray   (N_id,)   — higher → more ID-like
-    ood_scores : np.ndarray  (N_ood,)
-    auroc : float             in [0,1]
-    fpr95 : float             FPR at 95 % TPR
-    pca_dim : int             number of principal components used
-    """
-
     id_scores: np.ndarray
     ood_scores: np.ndarray
     auroc: float
@@ -83,14 +40,6 @@ def _extract_features(
     device: str,
     max_samples: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Forward-pass *loader* and collect penultimate features.
-
-    Returns
-    -------
-    features : (N, D)
-    labels   : (N,)
-    logits   : (N, C)
-    """
     model.eval()
     all_h, all_y, all_logits = [], [], []
     n = 0
@@ -129,18 +78,6 @@ def _neco_score(
     P: torch.Tensor,
     logits: Optional[torch.Tensor] = None,
 ) -> np.ndarray:
-    """NECO(x) = ||P h(x)|| / ||h(x)||, optionally × MaxLogit.
-
-    Parameters
-    ----------
-    features : (N, D)
-    P : (d, D)   PCA projection matrix
-    logits : (N, C), optional — multiply by max logit when given.
-
-    Returns
-    -------
-    np.ndarray (N,)
-    """
     projected = features @ P.T               # (N, d)
     proj_norms = torch.norm(projected, dim=1) # (N,)
     full_norms = torch.norm(features, dim=1)  # (N,)
@@ -166,33 +103,7 @@ def compute_neco_scores(
     use_maxlogit: bool = False,
     max_train_samples: int = 50_000,
 ) -> NECOResult:
-    """Compute NECO scores for ID and OOD data.
-
-    Implements eq. 6:  ``NECO(x) = ||P h(x)|| / ||h(x)||``
-
-    Parameters
-    ----------
-    model : nn.Module
-        Trained model.
-    id_loader : DataLoader
-        ID *test* data.
-    ood_loader : DataLoader
-        OOD data.
-    device : str
-    num_classes : int
-    id_train_loader : DataLoader, optional
-        ID *training* data for PCA.  Defaults to *id_loader*.
-    pca_dim : int, optional
-        Number of principal components.  Default: ``num_classes - 1``.
-    use_maxlogit : bool
-        Multiply NECO by max logit (recommended for ViT).
-    max_train_samples : int
-        Cap samples for PCA fitting.
-
-    Returns
-    -------
-    NECOResult
-    """
+    
     model.to(device).eval()
     classifier = _find_classifier(model)
     hook = _FeatureHook()
@@ -254,19 +165,7 @@ def compute_baseline_scores(
     device: str,
     method: str = "msp",
 ) -> np.ndarray:
-    """Compute a simple baseline OOD score for every sample in *loader*.
 
-    Parameters
-    ----------
-    method : {"msp", "maxlogit", "energy"}
-        * msp       — Maximum Softmax Probability (Hendrycks & Gimpel 2017)
-        * maxlogit  — Max Logit (Hendrycks et al. 2022)
-        * energy    — Energy = logsumexp(logits) (Liu et al. 2020)
-
-    Returns
-    -------
-    np.ndarray (N,)   Higher → more ID-like.
-    """
     model.eval()
     all_scores = []
 
@@ -298,14 +197,7 @@ def evaluate_ood_detection(
     id_scores: np.ndarray,
     ood_scores: np.ndarray,
 ) -> Dict[str, float]:
-    """Compute AUROC and FPR95 for OOD detection.
 
-    Convention: ID = positive class (higher score).
-
-    Returns
-    -------
-    dict  ``{"auroc": …, "fpr95": …}``  both in [0, 1].
-    """
     labels = np.concatenate([
         np.ones(len(id_scores)),
         np.zeros(len(ood_scores)),
@@ -331,7 +223,7 @@ def plot_neco_distributions(
     ood_name: str = "OOD",
     save_dir: Optional[str] = None,
 ) -> plt.Figure:
-    """NECO score histograms + ROC curve (cf. Fig E.16/E.17 in paper)."""
+    
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
     # Histogram
@@ -375,7 +267,7 @@ def plot_neco_distributions(
             f"neco_distributions_{ood_name.lower().replace('-', '')}.png",
         )
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"💾 Saved: {path}")
+        print(f"Saved: {path}")
 
     return fig
 
@@ -391,7 +283,7 @@ def plot_neco_pca_2d(
     max_samples: int = 2000,
     save_dir: Optional[str] = None,
 ) -> plt.Figure:
-    """PCA 2-D projection of ID + OOD features (cf. Fig 2 / D.14 in paper)."""
+    
     model.to(device).eval()
     classifier = _find_classifier(model)
     hook = _FeatureHook()
@@ -430,7 +322,7 @@ def plot_neco_pca_2d(
 
     ax.set_xlabel("PC 1")
     ax.set_ylabel("PC 2")
-    ax.set_title(f"PCA — {id_name} (colored) vs {ood_name} (gray)")
+    ax.set_title(f"PCA - {id_name} (colored) vs {ood_name} (gray)")
     ax.legend(fontsize=11, markerscale=3)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
@@ -442,7 +334,7 @@ def plot_neco_pca_2d(
             f"neco_pca_2d_{ood_name.lower().replace('-', '')}.png",
         )
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"💾 Saved: {path}")
+        print(f"Saved: {path}")
 
     return fig
 
@@ -452,13 +344,7 @@ def plot_pca_dim_sweep(
     ood_name: str = "OOD",
     save_dir: Optional[str] = None,
 ) -> plt.Figure:
-    """Plot AUROC & FPR95 vs PCA dimension (cf. Fig C.5/C.6 in paper).
 
-    Parameters
-    ----------
-    results_by_dim : dict[int, NECOResult]
-        Keyed by PCA dimension.
-    """
     dims = sorted(results_by_dim.keys())
     aurocs = [results_by_dim[d].auroc * 100 for d in dims]
     fpr95s = [results_by_dim[d].fpr95 * 100 for d in dims]
@@ -488,6 +374,6 @@ def plot_pca_dim_sweep(
             f"neco_pca_sweep_{ood_name.lower().replace('-', '')}.png",
         )
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"💾 Saved: {path}")
+        print(f"Saved: {path}")
 
     return fig

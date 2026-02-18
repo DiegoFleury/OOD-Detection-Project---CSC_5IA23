@@ -1,52 +1,3 @@
-"""
-Neural Collapse on Earlier Layers (NC1–NC5)
-=============================================
-Analyses how Neural Collapse emerges progressively through network depth.
-At early layers the features live in high-dimensional spatial maps; we apply
-Global Average Pooling (GAP) to obtain a feature vector per sample and then
-compute the standard NC metrics.
-
-Metrics computed at each layer:
-    NC1  — Activation collapse:   Tr(Σ_W Σ_B†) / C
-    NC2  — Equinorm:              CoV(‖μ̃_c‖)
-    NC2  — Equiangularity:        coherence(M̃)
-    NC3  — Self-duality (W ≈ M):  ‖W^T − M̃‖²_F  (penultimate only)
-    NC4  — NCC agreement:         1 − Acc(NCC vs network)  (ALL layers)
-    NC5  — ID/OOD orthogonality:  Avg_c |cos(μ_c, μ^OOD_G)|  (ALL layers, requires OOD data)
-
-Key insight (Papyan et al. 2020, Ben Ammar et al. 2024):
-    NC forms *last-to-first* — the penultimate layer collapses first, and
-    collapse propagates backward through the network during extended training.
-
-Usage (from notebook)::
-
-    from src.neural_collapse.nc_earlier_layer import (
-        analyze_layers_single_checkpoint,
-        analyze_layers_across_checkpoints,
-        plot_nc_by_layer,
-        plot_nc_layers_across_epochs,
-        plot_nc_heatmap,
-        LayerNCResult,
-        LayerNCTracker,
-    )
-
-    # Single checkpoint — all NC metrics per layer
-    results = analyze_layers_single_checkpoint(
-        model=model, loader=train_loader,
-        device="cuda", num_classes=100,
-        ood_loader=svhn_loader,          # optional, for NC5
-    )
-    plot_nc_by_layer(results)
-
-    # Across training — collapse propagation
-    tracker = analyze_layers_across_checkpoints(
-        checkpoint_dir="checkpoints/", model_class=ResNet18,
-        loader=train_loader, device="cuda", num_classes=100,
-        ood_loader=svhn_loader,
-    )
-    plot_nc_layers_across_epochs(tracker)
-"""
-
 from __future__ import annotations
 
 import glob
@@ -71,16 +22,12 @@ from .nc_analysis import _find_classifier, _load_checkpoint
 # ==========================================================================
 
 class _MultiLayerHook:
-    """Registers forward hooks on multiple named sub-modules and stores
-    the output of each, GAP-pooled to (B, D) when spatial."""
 
     def __init__(self):
         self.features: Dict[str, torch.Tensor] = {}
         self._handles: list = []
 
     def register(self, model: nn.Module, layer_names: List[str]) -> None:
-        """Attach hooks.  *layer_names* are dot-separated attribute paths
-        (e.g. ``"layer1"``, ``"layer2"``)."""
         self.remove()
         for name in layer_names:
             module = model
@@ -112,28 +59,6 @@ class _MultiLayerHook:
 
 @dataclass
 class LayerNCResult:
-    """NC1–NC5 metrics for a single layer at a single checkpoint.
-
-    Attributes
-    ----------
-    layer_name : str
-        E.g. ``"layer1"``, ``"layer4"``, ``"penultimate"``.
-    feature_dim : int
-        Dimension D of the (GAP-pooled) feature vector at this layer.
-    nc1 : float
-        Tr(Σ_W Σ_B†) / C — within-class variability collapse.
-    nc2_equinorm : float
-        CoV of class-mean norms (lower → more equinorm).
-    nc2_equiangularity : float
-        Coherence measure (lower → closer to simplex ETF).
-    nc3_w_m_dist : float or None
-        ‖W^T − M̃‖²_F (normalized).  Only at penultimate (needs classifier W).
-    nc4_ncc_mismatch : float
-        1 − agreement(NCC, network) at this layer.  Defined at ALL layers.
-    nc5_orthodev : float or None
-        Avg_c |cos(μ_c, μ^OOD_G)| at this layer.  None if no OOD data given.
-    """
-
     layer_name: str
     feature_dim: int
     nc1: float
@@ -146,10 +71,6 @@ class LayerNCResult:
 
 @dataclass
 class LayerNCTracker:
-    """Tracks per-layer NC1–NC5 across training epochs.
-
-    ``data[layer_name][metric_name]`` → list of floats (one per epoch).
-    """
 
     epochs: List[int] = field(default_factory=list)
     layer_names: List[str] = field(default_factory=list)
@@ -224,7 +145,6 @@ def _compute_nc5(
     id_means: torch.Tensor,
     ood_global_mean: torch.Tensor,
 ) -> float:
-    """NC5 OrthoDev = Avg_c |cos(µ_c, µ^OOD_G)|.  Should → 0."""
     mu_ood_norm = torch.norm(ood_global_mean)
     if mu_ood_norm < 1e-12:
         return 0.0
@@ -253,23 +173,7 @@ def _compute_layer_nc(
     all_features: Optional[torch.Tensor] = None,
     ood_global_mean: Optional[torch.Tensor] = None,
 ) -> dict:
-    """Compute NC1–NC5 on already-collected per-class features.
 
-    Parameters
-    ----------
-    features_by_class : dict[int, (N_c, D)]
-    num_classes : int
-    device : str
-    classifier_W : (C, D), optional — if given + dim matches → NC3.
-    network_preds : (N,), optional — if given with *all_features* → NC4.
-    all_features : (N, D), optional
-    ood_global_mean : (D,), optional — if given → NC5.
-
-    Returns
-    -------
-    dict with nc1, nc2_equinorm, nc2_equiangularity,
-    [nc3_w_m_dist], [nc4_ncc_mismatch], [nc5_orthodev].
-    """
     C = num_classes
 
     # ---- Class means ----
@@ -305,7 +209,7 @@ def _compute_layer_nc(
     if total_N > 0:
         Sw /= total_N
 
-    # ---- NC1: Tr{Σ_W Σ_B†} / C ----
+    # ---- NC1 ----
     Sw_np = Sw.cpu().float().numpy()
     Sb_np = Sb.cpu().float().numpy()
     try:
@@ -336,7 +240,7 @@ def _compute_layer_nc(
         "nc2_equiangularity": nc2_equiang,
     }
 
-    # ---- NC3: ||W^T − M̃||² (normalized Frobenius) — penultimate only ----
+    # ---- NC3 (penultimate only) ----
     if classifier_W is not None:
         W = classifier_W.to(device)
         if W.shape[1] == D:
@@ -377,27 +281,7 @@ def analyze_layers_single_checkpoint(
     include_penultimate: bool = True,
     ood_loader: Optional[torch.utils.data.DataLoader] = None,
 ) -> List[LayerNCResult]:
-    """Compute NC1–NC5 at each layer of the network.
 
-    Parameters
-    ----------
-    model : nn.Module
-        A model with named sub-modules (e.g. ``layer1`` … ``layer4``).
-    loader : DataLoader
-        ID training (or validation) data.
-    device : str
-    num_classes : int
-    layer_names : list[str], optional
-        Default: ``["layer1","layer2","layer3","layer4"]``.
-    include_penultimate : bool
-        Also analyse penultimate (pre-classifier) features.
-    ood_loader : DataLoader, optional
-        OOD data — if given, NC5 is computed at every layer.
-
-    Returns
-    -------
-    list[LayerNCResult]  ordered shallow → deep.
-    """
     model.to(device).eval()
 
     if layer_names is None:
@@ -411,7 +295,6 @@ def analyze_layers_single_checkpoint(
     multi_hook.register(model, layer_names)
 
     class _PenHook:
-        """Captures the input to the classifier (= penultimate features)."""
         def __init__(self):
             self.features = None
         def __call__(self, mod, inp, out):
@@ -424,7 +307,6 @@ def analyze_layers_single_checkpoint(
     )
 
     # ---- Collect ID features per class, per layer ----
-    # layer_features[name][class] → list[Tensor]
     layer_features: Dict[str, Dict[int, List[torch.Tensor]]] = {
         name: {c: [] for c in range(num_classes)} for name in layer_names
     }
@@ -472,7 +354,6 @@ def analyze_layers_single_checkpoint(
     cat_net_preds = torch.cat(all_net_preds)  # (N,)
 
     # ---- Collect OOD features per layer (for NC5) ----
-    # ood_global_means[layer_name] → (D,)
     ood_global_means: Dict[str, torch.Tensor] = {}
 
     if ood_loader is not None:
@@ -610,26 +491,7 @@ def analyze_layers_across_checkpoints(
     epoch_regex: str = r"epoch(\d+)",
     verbose: bool = True,
 ) -> LayerNCTracker:
-    """Compute per-layer NC1–NC5 across training checkpoints.
 
-    Parameters
-    ----------
-    checkpoint_dir : str
-    model_class : type
-    loader : DataLoader
-        ID training data.
-    device : str
-    num_classes : int
-    layer_names : list[str], optional
-    ood_loader : DataLoader, optional
-        OOD data — if given, NC5 is computed at every layer.
-    checkpoint_pattern, epoch_regex : str
-    verbose : bool
-
-    Returns
-    -------
-    LayerNCTracker
-    """
     if layer_names is None:
         layer_names = list(RESNET_LAYERS)
     all_names = layer_names + ["penultimate"]
@@ -690,12 +552,7 @@ def plot_nc_by_layer(
     title_suffix: str = "",
     save_dir: Optional[str] = None,
 ) -> plt.Figure:
-    """Bar chart of NC1–NC5 across layers (single checkpoint).
 
-    Layout: 2 rows × 3 cols.
-        (0,0) NC1   (0,1) NC2 equinorm   (0,2) NC2 equiangularity
-        (1,0) NC4   (1,1) NC5            (1,2) NC3 info box
-    """
     names = [r.layer_name for r in results]
     dims = [r.feature_dim for r in results]
     labels = [f"{n}\n(D={d})" for n, d in zip(names, dims)]
@@ -726,7 +583,7 @@ def plot_nc_by_layer(
     # ---- Row 1: NC4, NC5, NC3 info ----
     nc4_vals = [r.nc4_ncc_mismatch if r.nc4_ncc_mismatch is not None else 0 for r in results]
     _bar(axes[1, 0], nc4_vals,
-         "1 − NCC agreement", "NC4: NCC Mismatch")
+         "1 - NCC agreement", "NC4: NCC Mismatch")
 
     nc5_vals = [r.nc5_orthodev if r.nc5_orthodev is not None else 0 for r in results]
     has_nc5 = any(r.nc5_orthodev is not None for r in results)
@@ -787,10 +644,7 @@ def plot_nc_layers_across_epochs(
     tracker: LayerNCTracker,
     save_dir: Optional[str] = None,
 ) -> plt.Figure:
-    """Line plots of NC1–NC5 vs epoch, one line per layer.
 
-    Layout: 2 rows × 3 cols (NC1, NC2eq, NC2ea, NC4, NC5, empty/info).
-    """
     epochs = tracker.epochs
     layers = tracker.layer_names
     cmap = plt.cm.get_cmap("plasma", len(layers) + 1)
@@ -835,7 +689,7 @@ def plot_nc_layers_across_epochs(
     axes[1, 2].axis("off")
 
     fig.suptitle(
-        "Neural Collapse (NC1–NC5) Across Layers During Training",
+        "Neural Collapse (NC1-NC5) Across Layers During Training",
         fontsize=15, y=1.02,
     )
     fig.tight_layout()
@@ -854,13 +708,7 @@ def plot_nc_heatmap(
     metric: str = "nc1",
     save_dir: Optional[str] = None,
 ) -> plt.Figure:
-    """Heatmap: layers (y) × epochs (x) coloured by a chosen NC metric.
 
-    Parameters
-    ----------
-    metric : {"nc1", "nc2_equinorm", "nc2_equiangularity",
-              "nc4_ncc_mismatch", "nc5_orthodev"}
-    """
     epochs = tracker.epochs
     layers = tracker.layer_names
 
@@ -885,7 +733,7 @@ def plot_nc_heatmap(
     ax.set_xticklabels([str(epochs[i]) for i in tick_idx], fontsize=9)
     ax.set_xlabel("Epoch", fontsize=11)
 
-    label = f"log₁₀({metric})" if use_log else metric
+    label = f"log({metric})" if use_log else metric
     metric_titles = {
         "nc1": "NC1: Activation Collapse",
         "nc2_equinorm": "NC2: Equinorm",
@@ -894,7 +742,7 @@ def plot_nc_heatmap(
         "nc5_orthodev": "NC5: ID/OOD Orthogonality",
     }
     ax.set_title(
-        f"{metric_titles.get(metric, metric)} — Layer × Epoch",
+        f"{metric_titles.get(metric, metric)} — Layer x Epoch",
         fontsize=13,
     )
     cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
@@ -915,7 +763,6 @@ def plot_nc_heatmap(
 # ==========================================================================
 
 def save_layer_metrics_yaml(tracker: LayerNCTracker, path: str) -> None:
-    """Save layer-wise tracker metrics to YAML."""
     data = tracker.to_dict()
     for layer, metrics in data.get("data", {}).items():
         for key, values in metrics.items():
