@@ -81,7 +81,7 @@ class NCMetricsTracker:
         if self.accuracy:
             lines.append(f"Final accuracy: {self.accuracy[-1]:.4f}")
         if self.Sw_invSb:
-            lines.append(f"Final NC1 (Sw/Sb): {self.Sw_invSb[-1]:.4f}")
+            lines.append(f"Final NC1 Tr[Σ_W Σ_B† / C]: {self.Sw_invSb[-1]:.4f}")
         if self.norm_M_CoV:
             lines.append(f"Final NC2 equinorm (M CoV): {self.norm_M_CoV[-1]:.4f}")
         if self.cos_M:
@@ -250,28 +250,17 @@ def _compute_nc_metrics(
             if len(idxs) == 0:
                 continue
             h_c = h[idxs]
-            z = h_c - mean[c].unsqueeze(0) # centered features
+            z = h_c - mean[c].unsqueeze(0)
             Sw += z.T @ z
 
     total_N = sum(N)
-    Sw /= total_N # intraclass covaiance matrix (normalized by total samples)
+    Sw /= total_N
 
     # ---- Derived quantities ----
     M_T = M.T  # (D, C)
     muG = M_T.mean(dim=1, keepdim=True)  # global mean (D, 1)
     M_ = M_T - muG  # centered class means (D, C)
-    Sb = (M_ @ M_.T) / num_classes  # between-class covariance  (interclass covariance matrix)
-
-    # NC1: Tr{Sw @ Sb^{-1}} / C
-    Sw_np = Sw.cpu().float().numpy()
-    Sb_np = Sb.cpu().float().numpy()
-    try:
-        k = min(num_classes - 1, D - 1)
-        eigvec, eigval, _ = svds(Sb_np.astype(np.float64), k=k)
-        inv_Sb = eigvec @ np.diag(eigval ** (-1)) @ eigvec.T
-        nc1 = np.trace(Sw_np @ inv_Sb) / num_classes
-    except Exception:
-        nc1 = float("nan")
+    Sb = (M_ @ M_.T) / num_classes  # between-class covariance
 
     W = classifier.weight.detach().to(device)  # (C, D)
 
@@ -279,8 +268,8 @@ def _compute_nc_metrics(
     M_norms = torch.norm(M_, dim=0)  # per-class mean norms
     W_norms = torch.norm(W, dim=1)   # per-class classifier norms
 
-    norm_M_CoV = (torch.std(M_norms) / torch.mean(M_norms)).item() #CoV of mean norms -> equinorm if close to 0
-    norm_W_CoV = (torch.std(W_norms) / torch.mean(W_norms)).item() #CoV of classifier norms -> equinorm if close to 0
+    norm_M_CoV = (torch.std(M_norms) / torch.mean(M_norms)).item()
+    norm_W_CoV = (torch.std(W_norms) / torch.mean(W_norms)).item()
 
     # NC2: equiangularity (coherence)
     def coherence(V: torch.Tensor, K: int) -> float:
@@ -293,14 +282,21 @@ def _compute_nc_metrics(
     cos_M_val = coherence(M_ / (M_norms + 1e-12), num_classes)
     cos_W_val = coherence(W.T / (W_norms.unsqueeze(0) + 1e-12), num_classes)
 
-    #coherence of centered means and classifiers (should both approach 0 for simplex ETF)
-
+    # NC1: Tr{Σ_W @ Σ_B†} / C  (Moore-Penrose pseudoinverse)
+    Sw_np = Sw.cpu().float().numpy()
+    Sb_np = Sb.cpu().float().numpy()
+    try:
+        k = min(num_classes - 1, D - 1)
+        eigvec, eigval, _ = svds(Sb_np.astype(np.float64), k=k)
+        inv_Sb = eigvec @ np.diag(eigval ** (-1)) @ eigvec.T
+        nc1 = np.trace(Sw_np @ inv_Sb) / num_classes
+    except Exception:
+        nc1 = float("nan")
 
     # NC3: ||W^T - M_||^2 (Frobenius, normalized)
     normalized_M = M_ / (torch.norm(M_, "fro") + 1e-12)
     normalized_W = W.T / (torch.norm(W.T, "fro") + 1e-12)
-    W_M_dist = (torch.norm(normalized_W - normalized_M) ** 2).item() 
-    # must be 0 if perfect self duality
+    W_M_dist = (torch.norm(normalized_W - normalized_M) ** 2).item()
 
     # NC4: NCC mismatch
     ncc_mismatch = 1.0 - NCC_match_net / total_N
@@ -425,7 +421,7 @@ def plot_nc_evolution(
     ax = axes[0, 0]
     ax.semilogy(epochs, tracker.Sw_invSb, "b-o", markersize=3)
     ax.set_xlabel("Epoch")
-    ax.set_ylabel(r"$\mathrm{Tr}(S_W S_B^{-1}) / C$")
+    ax.set_ylabel(r"$\mathrm{Tr}(\Sigma_W \Sigma_B^{\dagger}) / C$")
     ax.set_title("NC1: Activation Collapse")
     ax.grid(True, alpha=0.3)
 
@@ -479,7 +475,7 @@ def plot_nc_evolution(
         os.makedirs(save_dir, exist_ok=True)
         path = os.path.join(save_dir, "nc_evolution_all.png")
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"💾 Saved: {path}")
+        print(f" Saved: {path}")
 
     return fig
 
@@ -495,8 +491,8 @@ def plot_nc_individual(
 
     specs = [
         ("NC1_activation_collapse", "NC1: Activation Collapse",
-         r"$\mathrm{Tr}(S_W S_B^{-1}) / C$",
-         [(tracker.Sw_invSb, "b-o", "Sw/Sb")], True),
+         r"$\mathrm{Tr}(\Sigma_W \Sigma_B^{\dagger}) / C$",
+         [(tracker.Sw_invSb, "b-o", r"$\mathrm{Tr}(\Sigma_W \Sigma_B^{\dagger})/C$")], True),
         ("NC2_equinorm", "NC2: Equinorm", "Std / Mean of Norms",
          [(tracker.norm_M_CoV, "m-o", "Class Means"),
           (tracker.norm_W_CoV, "g-s", "Classifiers")], False),
@@ -534,7 +530,7 @@ def plot_nc_individual(
         figs[name] = fig
 
     if save_dir:
-        print(f"💾 Saved {len(figs)} individual figures to {save_dir}")
+        print(f" Saved {len(figs)} individual figures to {save_dir}")
 
     return figs
 
@@ -558,4 +554,4 @@ def save_metrics_yaml(tracker: NCMetricsTracker, path: str) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
         yaml.dump(data, f, default_flow_style=False)
-    print(f"💾 Metrics saved to: {path}")
+    print(f" Metrics saved to: {path}")

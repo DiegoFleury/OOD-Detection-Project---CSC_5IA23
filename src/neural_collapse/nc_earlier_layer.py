@@ -774,7 +774,7 @@ def plot_nc_by_layer(
         os.makedirs(save_dir, exist_ok=True)
         path = os.path.join(save_dir, "nc_by_layer.png")
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"💾 Saved: {path}")
+        print(f" Saved: {path}")
 
     return fig
 
@@ -844,7 +844,7 @@ def plot_nc_layers_across_epochs(
         os.makedirs(save_dir, exist_ok=True)
         path = os.path.join(save_dir, "nc_layers_across_epochs.png")
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"💾 Saved: {path}")
+        print(f" Saved: {path}")
 
     return fig
 
@@ -905,7 +905,7 @@ def plot_nc_heatmap(
         os.makedirs(save_dir, exist_ok=True)
         path = os.path.join(save_dir, f"nc_heatmap_{metric}.png")
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"💾 Saved: {path}")
+        print(f" Saved: {path}")
 
     return fig
 
@@ -926,4 +926,4 @@ def save_layer_metrics_yaml(tracker: LayerNCTracker, path: str) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
         yaml.dump(data, f, default_flow_style=False)
-    print(f"💾 Layer metrics saved to: {path}")
+    print(f" Layer metrics saved to: {path}")

@@ -437,7 +437,7 @@ def plot_nc5_convergence(
             f"nc5_convergence_{ood_name.lower().replace('-', '')}.png",
         )
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"💾 Saved: {path}")
+        print(f" Saved: {path}")
 
     return fig
 
@@ -518,7 +518,7 @@ def plot_ood_summary(
             f"nc_ood_summary_{ood_name.lower().replace('-', '')}.png",
         )
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"💾 Saved: {path}")
+        print(f" Saved: {path}")
 
     return fig
 
@@ -539,7 +539,7 @@ def save_ood_metrics_yaml(tracker: NCOODTracker, path: str) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
         yaml.dump(data, f, default_flow_style=False)
-    print(f"💾 OOD metrics saved to: {path}")
+    print(f" OOD metrics saved to: {path}")
 
 
 # ==========================================================================
@@ -665,7 +665,7 @@ def plot_pca_2d(
             f"pca_2d_{ood_name.lower().replace('-', '')}.png",
         )
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"💾 Saved: {path}")
+        print(f" Saved: {path}")
 
     return fig
 
@@ -854,6 +854,6 @@ def plot_pca_3d_interactive(
     if save_path:
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
         fig.write_html(save_path)
-        print(f"💾 Saved: {save_path}")
+        print(f" Saved: {save_path}")
 
     return fig
