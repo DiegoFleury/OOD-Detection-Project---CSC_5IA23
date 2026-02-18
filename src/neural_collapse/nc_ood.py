@@ -36,7 +36,7 @@ import glob
 import os
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Type
+from typing import Dict, List, Optional, Tuple, Type
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -540,3 +540,320 @@ def save_ood_metrics_yaml(tracker: NCOODTracker, path: str) -> None:
     with open(path, "w") as f:
         yaml.dump(data, f, default_flow_style=False)
     print(f"💾 OOD metrics saved to: {path}")
+
+
+# ==========================================================================
+# Feature extraction (shared helper for PCA plots)
+# ==========================================================================
+
+@torch.no_grad()
+def _extract_features(
+    model: nn.Module,
+    hook: _FeatureHook,
+    loader: torch.utils.data.DataLoader,
+    device: str,
+    max_samples: Optional[int] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Forward-pass *loader* and collect penultimate features.
+
+    Returns
+    -------
+    features : (N, D)
+    labels   : (N,)
+    logits   : (N, C)
+    """
+    model.eval()
+    all_h, all_y, all_logits = [], [], []
+    n = 0
+
+    for images, targets in loader:
+        images = images.to(device)
+        outputs = model(images)
+        h = hook.features.view(images.shape[0], -1)
+
+        all_h.append(h.cpu())
+        all_y.append(targets)
+        all_logits.append(outputs.cpu())
+
+        n += images.shape[0]
+        if max_samples is not None and n >= max_samples:
+            break
+
+    features = torch.cat(all_h, dim=0)
+    labels = torch.cat(all_y, dim=0)
+    logits = torch.cat(all_logits, dim=0)
+
+    if max_samples is not None:
+        features = features[:max_samples]
+        labels = labels[:max_samples]
+        logits = logits[:max_samples]
+
+    return features, labels, logits
+
+
+# ==========================================================================
+# PCA 2-D projection (static, matplotlib)
+# ==========================================================================
+
+def plot_pca_2d(
+    model: nn.Module,
+    id_loader: torch.utils.data.DataLoader,
+    ood_loader: torch.utils.data.DataLoader,
+    device: str,
+    num_classes: int,
+    id_name: str = "ID",
+    ood_name: str = "OOD",
+    max_samples: int = 2000,
+    save_dir: Optional[str] = None,
+) -> plt.Figure:
+    """PCA 2-D projection of ID + OOD penultimate features.
+
+    Reproduces Figure 2 / D.14 from the NECO paper:
+    - ID samples coloured by class, OOD in gray.
+    - Under NC, OOD projects near the origin.
+    """
+    from sklearn.decomposition import PCA
+
+    model.to(device).eval()
+    classifier = _find_classifier(model)
+    hook = _FeatureHook()
+    handle = classifier.register_forward_hook(hook)
+
+    try:
+        id_feats, id_labels, _ = _extract_features(
+            model, hook, id_loader, device, max_samples=max_samples
+        )
+        ood_feats, _, _ = _extract_features(
+            model, hook, ood_loader, device, max_samples=max_samples
+        )
+    finally:
+        handle.remove()
+
+    pca = PCA(n_components=2)
+    id_proj = pca.fit_transform(id_feats.numpy())
+    ood_proj = pca.transform(ood_feats.numpy())
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    unique_labels = np.unique(id_labels.numpy())
+    cmap = plt.cm.get_cmap("tab20", len(unique_labels))
+    for i, c in enumerate(unique_labels):
+        mask = id_labels.numpy() == c
+        ax.scatter(
+            id_proj[mask, 0], id_proj[mask, 1],
+            c=[cmap(i % 20)], s=8, alpha=0.5,
+        )
+
+    ax.scatter(
+        ood_proj[:, 0], ood_proj[:, 1],
+        c="gray", s=8, alpha=0.3, marker="x",
+        label=f"{ood_name} (OOD)",
+    )
+
+    var_pct = pca.explained_variance_ratio_ * 100
+    ax.set_xlabel(f"PC 1 ({var_pct[0]:.1f}%)")
+    ax.set_ylabel(f"PC 2 ({var_pct[1]:.1f}%)")
+    ax.set_title(f"PCA — {id_name} (colored) vs {ood_name} (gray)")
+    ax.legend(fontsize=11, markerscale=3)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        path = os.path.join(
+            save_dir,
+            f"pca_2d_{ood_name.lower().replace('-', '')}.png",
+        )
+        fig.savefig(path, dpi=150, bbox_inches="tight")
+        print(f"💾 Saved: {path}")
+
+    return fig
+
+
+# ==========================================================================
+# PCA 3-D projection (interactive, Plotly)
+# ==========================================================================
+
+@torch.no_grad()
+def plot_pca_3d_interactive(
+    model: nn.Module,
+    id_loader: torch.utils.data.DataLoader,
+    ood_loader: torch.utils.data.DataLoader,
+    device: str,
+    num_classes: int,
+    id_train_loader: Optional[torch.utils.data.DataLoader] = None,
+    id_name: str = "ID",
+    ood_name: str = "OOD",
+    max_samples: int = 3000,
+    show_class_means: bool = True,
+    show_ood_mean: bool = True,
+    save_path: Optional[str] = None,
+):
+    """Interactive 3D PCA scatter of ID + OOD features (Plotly).
+
+    Visualises NC5 (ID/OOD orthogonality):
+    - ID class means form a simplex ETF structure
+    - OOD global mean should be near the origin / orthogonal to the ID subspace
+
+    Parameters
+    ----------
+    model, id_loader, ood_loader, device, num_classes : standard
+    id_train_loader : DataLoader, optional
+        If given, PCA is fitted on training features (recommended).
+    id_name, ood_name : str
+    max_samples : int
+    show_class_means : bool
+        Plot large markers for per-class means.
+    show_ood_mean : bool
+        Plot star for OOD global mean + line from origin.
+    save_path : str, optional
+        If given, save standalone HTML file.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure  (call ``.show()`` in notebook)
+    """
+    try:
+        import plotly.graph_objects as go
+        import plotly.express as px
+    except ImportError:
+        raise ImportError(
+            "plotly is required for 3D interactive plots. "
+            "Install with: pip install plotly"
+        )
+    from sklearn.decomposition import PCA
+
+    model.to(device).eval()
+    classifier = _find_classifier(model)
+    hook = _FeatureHook()
+    handle = classifier.register_forward_hook(hook)
+
+    try:
+        # Fit PCA on training features
+        train_ldr = id_train_loader if id_train_loader is not None else id_loader
+        train_feats, _, _ = _extract_features(
+            model, hook, train_ldr, device, max_samples=50_000
+        )
+        pca = PCA(n_components=3)
+        pca.fit(train_feats.numpy())
+
+        # Project ID
+        id_feats, id_labels, _ = _extract_features(
+            model, hook, id_loader, device, max_samples=max_samples
+        )
+        id_proj = pca.transform(id_feats.numpy())
+
+        # Project OOD
+        ood_feats, _, _ = _extract_features(
+            model, hook, ood_loader, device, max_samples=max_samples
+        )
+        ood_proj = pca.transform(ood_feats.numpy())
+    finally:
+        handle.remove()
+
+    # Variance explained
+    var_pct = pca.explained_variance_ratio_ * 100
+
+    # --- Build plotly figure ---
+    fig = go.Figure()
+
+    # ID samples (one trace per class, grouped in legend)
+    unique_labels = np.unique(id_labels.numpy())
+    palette = px.colors.qualitative.Alphabet
+    if len(unique_labels) > len(palette):
+        palette = palette * (len(unique_labels) // len(palette) + 1)
+
+    for i, c in enumerate(unique_labels):
+        mask = id_labels.numpy() == c
+        fig.add_trace(go.Scatter3d(
+            x=id_proj[mask, 0], y=id_proj[mask, 1], z=id_proj[mask, 2],
+            mode="markers",
+            marker=dict(size=2, color=palette[i % len(palette)], opacity=0.4),
+            name=f"Class {c}",
+            legendgroup="id",
+            showlegend=(i < 5),
+            hovertemplate=f"Class {c}<br>PC1=%{{x:.2f}}<br>PC2=%{{y:.2f}}<br>PC3=%{{z:.2f}}",
+        ))
+
+    # OOD samples
+    fig.add_trace(go.Scatter3d(
+        x=ood_proj[:, 0], y=ood_proj[:, 1], z=ood_proj[:, 2],
+        mode="markers",
+        marker=dict(size=2, color="gray", opacity=0.3, symbol="x"),
+        name=f"{ood_name} (OOD)",
+        legendgroup="ood",
+        hovertemplate=f"{ood_name}<br>PC1=%{{x:.2f}}<br>PC2=%{{y:.2f}}<br>PC3=%{{z:.2f}}",
+    ))
+
+    # Class means
+    if show_class_means:
+        id_means_3d = []
+        for c in unique_labels:
+            mask = id_labels.numpy() == c
+            id_means_3d.append(id_proj[mask].mean(axis=0))
+        id_means_3d = np.array(id_means_3d)
+
+        fig.add_trace(go.Scatter3d(
+            x=id_means_3d[:, 0], y=id_means_3d[:, 1], z=id_means_3d[:, 2],
+            mode="markers",
+            marker=dict(size=6, color="black", symbol="diamond", opacity=0.9),
+            name=f"{id_name} class means",
+            hovertemplate="Class mean<br>PC1=%{x:.2f}<br>PC2=%{y:.2f}<br>PC3=%{z:.2f}",
+        ))
+
+    # OOD global mean + line from origin
+    if show_ood_mean:
+        ood_mean_3d = ood_proj.mean(axis=0)
+
+        fig.add_trace(go.Scatter3d(
+            x=[ood_mean_3d[0]], y=[ood_mean_3d[1]], z=[ood_mean_3d[2]],
+            mode="markers",
+            marker=dict(size=10, color="red", symbol="diamond"),
+            name=f"{ood_name} global mean (µ_G^OOD)",
+            hovertemplate=(
+                f"{ood_name} global mean<br>"
+                "PC1=%{x:.2f}<br>PC2=%{y:.2f}<br>PC3=%{z:.2f}"
+            ),
+        ))
+
+        # Line from origin to OOD mean
+        fig.add_trace(go.Scatter3d(
+            x=[0, ood_mean_3d[0]], y=[0, ood_mean_3d[1]], z=[0, ood_mean_3d[2]],
+            mode="lines",
+            line=dict(color="red", width=4, dash="dash"),
+            name="Origin → µ_G^OOD",
+            showlegend=False,
+        ))
+
+        # Origin marker
+        fig.add_trace(go.Scatter3d(
+            x=[0], y=[0], z=[0],
+            mode="markers",
+            marker=dict(size=6, color="black", symbol="cross"),
+            name="Origin",
+        ))
+
+    fig.update_layout(
+        title=dict(
+            text=(
+                f"3D PCA — {id_name} vs {ood_name}<br>"
+                f"<sub>Var explained: PC1={var_pct[0]:.1f}%, "
+                f"PC2={var_pct[1]:.1f}%, PC3={var_pct[2]:.1f}%</sub>"
+            ),
+            x=0.5,
+        ),
+        scene=dict(
+            xaxis_title=f"PC1 ({var_pct[0]:.1f}%)",
+            yaxis_title=f"PC2 ({var_pct[1]:.1f}%)",
+            zaxis_title=f"PC3 ({var_pct[2]:.1f}%)",
+        ),
+        width=900, height=700,
+        legend=dict(itemsizing="constant"),
+    )
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+        fig.write_html(save_path)
+        print(f"💾 Saved: {save_path}")
+
+    return fig

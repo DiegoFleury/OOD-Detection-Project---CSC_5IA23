@@ -3,9 +3,9 @@ Neural Collapse analysis package.
 
 Submodules
 ----------
-nc_analysis : NC1–NC4 metric computation across checkpoints (ID only).
-nc_ood      : NC5 (ID/OOD orthogonality) + NC1/NC2 with OOD as extra class.
-neco        : NECO score (eq. 6), baselines (MSP/MaxLogit/Energy), evaluation.
+nc_analysis      : NC1–NC4 metric computation across checkpoints (ID only).
+nc_ood           : NC5 (ID/OOD orthogonality) + NC1/NC2 with OOD + PCA projections.
+nc_earlier_layer : Layer-wise NC1–NC5 across network depth.
 """
 
 from .nc_analysis import (
@@ -22,16 +22,8 @@ from .nc_ood import (
     plot_nc5_convergence,
     plot_ood_summary,
     save_ood_metrics_yaml,
-)
-
-from .neco import (
-    NECOResult,
-    compute_neco_scores,
-    compute_baseline_scores,
-    evaluate_ood_detection,
-    plot_neco_distributions,
-    plot_neco_pca_2d,
-    plot_pca_dim_sweep,
+    plot_pca_2d,
+    plot_pca_3d_interactive,
 )
 
 from .nc_earlier_layer import (
@@ -52,21 +44,15 @@ __all__ = [
     "plot_nc_evolution",
     "plot_nc_individual",
     "save_metrics_yaml",
-    # nc_ood (NC5 across epochs)
+    # nc_ood (NC5 + PCA projections)
     "NCOODTracker",
     "load_checkpoints_and_analyze_ood",
     "plot_nc5_convergence",
     "plot_ood_summary",
     "save_ood_metrics_yaml",
-    # neco (NECO score + baselines + eval)
-    "NECOResult",
-    "compute_neco_scores",
-    "compute_baseline_scores",
-    "evaluate_ood_detection",
-    "plot_neco_distributions",
-    "plot_neco_pca_2d",
-    "plot_pca_dim_sweep",
-    # nc_earlier_layer (layer-wise NC analysis)
+    "plot_pca_2d",
+    "plot_pca_3d_interactive",
+    # nc_earlier_layer (layer-wise NC1–NC5)
     "LayerNCResult",
     "LayerNCTracker",
     "analyze_layers_single_checkpoint",
