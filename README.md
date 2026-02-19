@@ -23,8 +23,9 @@
 This project implements and analyzes **Out-of-Distribution (OOD) detection** methods and studies the **Neural Collapse** phenomenon in deep neural networks. We train a ResNet-18 classifier on CIFAR-100 and evaluate six OOD scoring techniques, then study how Neural Collapse properties (NC1–NC5) emerge during training and across network layers.
 
 <p align="center">
-<img src="results/figures/training/training_curves.gif" width="80%"/>
+  <img src="./figures/gifs/training_curves.gif" width="80%" alt="Training curves animation"/>
 </p>
+
 
 ## :dart: Overview
 
@@ -40,6 +41,7 @@ The project addresses three main questions:
 OOD-Detection-Project---CSC_5IA23/
 ├── README.md
 ├── report.pdf
+├── Sujet_OOD.pdf
 ├── configs/
 │   └── config.yaml                  # Hyperparameters & paths
 ├── notebooks/
