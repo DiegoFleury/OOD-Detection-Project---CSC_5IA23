@@ -37,7 +37,7 @@ class _MultiLayerHook:
             def _make_hook(n):
                 def hook(_mod, _inp, out):
                     if out.dim() == 4:
-                        pooled = out.mean(dim=[2, 3])   # GAP: (B,C,H,W) → (B,C)
+                        pooled = out.mean(dim=[2, 3]) 
                     else:
                         pooled = out
                     self.features[n] = pooled.detach()

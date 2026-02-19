@@ -133,7 +133,6 @@ def _compute_nc_ood_metrics(
     C = num_classes
     C_total = C + 1
 
-    # ---- Pass 1: class means ----
     N_id = [0] * C
     mean_id = [None] * C
 
@@ -178,21 +177,17 @@ def _compute_nc_ood_metrics(
     M_id = torch.stack(mean_id)                                   # (C, D)
     M_all = torch.cat([M_id, mean_ood.unsqueeze(0)], dim=0)       # (C+1, D)
 
-    # ---- NC5 ----
     nc5 = _compute_nc5(M_id, mean_ood)
 
-    # ---- Centered class means ----
     muG_id = M_id.mean(dim=0, keepdim=True)
     M_id_centered = (M_id - muG_id).T                             # (D, C)
 
     muG_all = M_all[:C].mean(dim=0, keepdim=True)                 # global mean from ID
     M_all_centered = (M_all - muG_all).T                          # (D, C+1)
 
-    # ---- NC2: equinorm (ID only) ----
     M_norms_id = torch.norm(M_id_centered, dim=0)
     nc2_equinorm_id = (torch.std(M_norms_id) / (torch.mean(M_norms_id) + 1e-12)).item()
 
-    # ---- NC2: equiangularity ----
     M_id_normed = M_id_centered / (M_norms_id.unsqueeze(0) + 1e-12)
     nc2_equiang_id = _coherence(M_id_normed, C, device)
 
@@ -200,7 +195,6 @@ def _compute_nc_ood_metrics(
     M_all_normed = M_all_centered / (M_norms_all.unsqueeze(0) + 1e-12)
     nc2_equiang_id_ood = _coherence(M_all_normed, C_total, device)
 
-    # ---- Pass 2: within-class covariance ----
     Sw_id = torch.zeros(D, D, device=device)
     for images, targets in id_loader:
         images, targets = images.to(device), targets.to(device)
@@ -225,7 +219,6 @@ def _compute_nc_ood_metrics(
     Sw_id_avg = Sw_id / max(total_N_id, 1)
     Sw_all_avg = (Sw_id + Sw_ood) / max(total_N_id + N_ood, 1)
 
-    # ---- NC1 ----
     def _nc1(Sw_np, Sb_np, n_classes):
         try:
             k = min(n_classes - 1, D - 1)
